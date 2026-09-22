@@ -70,7 +70,7 @@ phần để denormalize (ADR-004). Lát H nằm cuối vì nó phụ thuộc **
 
 **Owns:** `@ADR-001`
 
-- [ ] **Step 1: Khởi tạo git và bộ khung thư mục**
+- [x] **Step 1: Khởi tạo git và bộ khung thư mục**
 
 ```bash
 cd /Users/hoa.ctp/Project/my_project/recipe_and_meal_planning_app
@@ -78,7 +78,13 @@ git init
 mkdir -p packages/shared/lib packages/api_client/lib apps/api apps/app db/migrations
 ```
 
-- [ ] **Step 2: Viết `melos.yaml`**
+- [x] **Step 2: Viết cấu hình melos**
+
+> **Đã chạy — lệch so với bản viết dưới đây.** Melos 8 không còn đọc `melos.yaml`;
+> cấu hình nằm ở mục `melos:` trong `pubspec.yaml` gốc, bốn package dùng Dart pub
+> workspace (`resolution: workspace`, SDK `^3.9.0`). Script `test` thêm
+> `--exclude-tags=integration` và có thêm `test:widget` chạy `flutter test`, vì
+> `dart test` không chạy được package Flutter.
 
 ```yaml
 name: recipe_meal_planner
@@ -99,7 +105,7 @@ scripts:
     run: melos exec --scope=api -- dart test --tags=integration
 ```
 
-- [ ] **Step 3: Viết `packages/shared/pubspec.yaml`**
+- [x] **Step 3: Viết `packages/shared/pubspec.yaml`**
 
 ```yaml
 name: shared
@@ -112,7 +118,7 @@ dev_dependencies:
   lints: ^4.0.0
 ```
 
-- [ ] **Step 4: Viết `docker-compose.yml`**
+- [x] **Step 4: Viết `docker-compose.yml`**
 
 ```yaml
 services:
@@ -125,12 +131,12 @@ services:
     ports: ["5432:5432"]
 ```
 
-- [ ] **Step 5: Bootstrap và xác nhận toolchain chạy**
+- [x] **Step 5: Bootstrap và xác nhận toolchain chạy**
 
 Run: `dart pub global activate melos && melos bootstrap && melos run analyze`
 Expected: `analyze` chạy qua cả bốn package, 0 issue.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A
@@ -151,7 +157,7 @@ git commit -m "chore: scaffold melos monorepo with four packages"
 
 **Owns:** `@ADR-010`
 
-- [ ] **Step 1: Viết test thất bại — chạy migration hai lần là idempotent**
+- [x] **Step 1: Viết test thất bại — chạy migration hai lần là idempotent**
 
 ```dart
 // apps/api/test/tool/migrate_test.dart
@@ -176,12 +182,19 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: Chạy để xác nhận nó fail**
+> **Đã chạy — lệch so với bản viết dưới đây.** Logic chọn và sắp xếp tệp migration
+> tách sang `apps/api/lib/src/db/migration_files.dart` (unit test, không cần database);
+> `runMigrations` ở `lib/src/db/migrator.dart` và trả về tên các migration vừa áp dụng
+> để test khẳng định idempotent qua giao diện công khai. `tool/migrate.dart` chỉ còn là
+> CLI mỏng. **Step 2, 5, 6 chưa chạy được: máy chưa có PostgreSQL** (không có Docker,
+> không có psql). Chạy lại khi có database bằng `melos exec --scope=api -- dart test --tags=integration`.
+
+- [ ] **Step 2: Chạy để xác nhận nó fail** *(chờ PostgreSQL)*
 
 Run: `docker compose up -d db && melos run test:integration`
 Expected: FAIL — `runMigrations` chưa tồn tại.
 
-- [ ] **Step 3: Viết `0001_extensions_and_enums.sql`**
+- [x] **Step 3: Viết `0001_extensions_and_enums.sql`**
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -206,7 +219,7 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 ```
 
-- [ ] **Step 4: Viết `migrate.dart`**
+- [x] **Step 4: Viết `migrate.dart`**
 
 ```dart
 Future<void> runMigrations(Connection conn, String dir) async {
@@ -242,17 +255,17 @@ Future<void> runMigrations(Connection conn, String dir) async {
 }
 ```
 
-- [ ] **Step 5: Chạy test để xác nhận pass**
+- [ ] **Step 5: Chạy test để xác nhận pass** *(chờ PostgreSQL)*
 
 Run: `melos run test:integration`
 Expected: PASS.
 
-- [ ] **Step 6: Kiểm tra `immutable_unaccent` hoạt động với tiếng Việt**
+- [ ] **Step 6: Kiểm tra `immutable_unaccent` hoạt động với tiếng Việt** *(chờ PostgreSQL — đã có test `@integration` thay cho lệnh psql thủ công)*
 
 Run: `docker compose exec db psql -U app -d recipe -c "SELECT immutable_unaccent('Phở Bò');"`
 Expected: `pho bo`
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/api/tool/migrate.dart db/migrations/0001_extensions_and_enums.sql apps/api/test/
@@ -274,7 +287,7 @@ git commit -m "feat(db): migration runner and initial extensions"
 
 **Owns:** `@ADR-002`
 
-- [ ] **Step 1: Viết test thất bại — exception nghiệp vụ thành JSON lỗi ổn định**
+- [x] **Step 1: Viết test thất bại — exception nghiệp vụ thành JSON lỗi ổn định**
 
 ```dart
 test('AppException được map thành khuôn lỗi chung', () async {
@@ -288,12 +301,12 @@ test('AppException được map thành khuôn lỗi chung', () async {
 });
 ```
 
-- [ ] **Step 2: Chạy để xác nhận fail**
+- [x] **Step 2: Chạy để xác nhận fail**
 
 Run: `melos run test`
 Expected: FAIL — `errorMapper` chưa tồn tại.
 
-- [ ] **Step 3: Viết `app_exception.dart` và `error_mapper.dart`**
+- [x] **Step 3: Viết `app_exception.dart` và `error_mapper.dart`**
 
 ```dart
 class AppException implements Exception {
@@ -325,12 +338,12 @@ Middleware errorMapper() => (handler) => (context) async {
     };
 ```
 
-- [ ] **Step 4: Chạy test để xác nhận pass**
+- [x] **Step 4: Chạy test để xác nhận pass**
 
 Run: `melos run test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/
