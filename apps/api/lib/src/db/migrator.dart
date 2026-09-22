@@ -27,7 +27,9 @@ Future<List<String>> runMigrations(Connection conn, String dirPath) async {
     if (applied.contains(migration.version)) continue;
 
     await conn.runTx((tx) async {
-      await tx.execute(migration.readSql());
+      // Simple query mode: tệp migration chứa nhiều lệnh, mà extended protocol
+      // (mặc định) chỉ nhận một lệnh cho mỗi prepared statement.
+      await tx.execute(migration.readSql(), queryMode: QueryMode.simple);
       await tx.execute(
         Sql.named(
           'INSERT INTO schema_migrations (version, name) VALUES (@version, @name)',

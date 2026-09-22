@@ -10,9 +10,28 @@ const migrationsDirectory = '../../db/migrations';
 ///
 /// Dọn sạch ở lúc mở chứ không phải lúc đóng: nếu một lần chạy hỏng giữa
 /// chừng, lần sau vẫn bắt đầu từ database trống.
+///
+/// Luôn nối tới database **riêng cho test** (`recipe_test` nếu không khai
+/// `PGDATABASE_TEST`), không bao giờ nối vào database dev: hàm này xoá sạch
+/// schema mỗi lần chạy.
 Future<Connection> openTestConnection() async {
+  final base = endpointFromEnvironment();
+  final testDatabase =
+      Platform.environment['PGDATABASE_TEST'] ?? 'recipe_test';
+  if (testDatabase == base.database &&
+      Platform.environment['PGDATABASE_TEST'] == null) {
+    throw StateError(
+      'Database test trùng database dev ($testDatabase). Đặt PGDATABASE_TEST.',
+    );
+  }
   final conn = await Connection.open(
-    endpointFromEnvironment(),
+    Endpoint(
+      host: base.host,
+      port: base.port,
+      database: testDatabase,
+      username: base.username,
+      password: base.password,
+    ),
     settings: connectionSettingsFromEnvironment(),
   );
   await conn.execute('DROP SCHEMA IF EXISTS public CASCADE');
@@ -20,7 +39,3 @@ Future<Connection> openTestConnection() async {
   return conn;
 }
 
-/// Thông báo cho người chạy test biết cần bật database.
-String get databaseHint =>
-    'Cần PostgreSQL đang chạy: docker compose up -d db '
-    '(PGHOST=${Platform.environment['PGHOST'] ?? 'localhost'})';

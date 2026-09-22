@@ -186,10 +186,12 @@ void main() {
 > tách sang `apps/api/lib/src/db/migration_files.dart` (unit test, không cần database);
 > `runMigrations` ở `lib/src/db/migrator.dart` và trả về tên các migration vừa áp dụng
 > để test khẳng định idempotent qua giao diện công khai. `tool/migrate.dart` chỉ còn là
-> CLI mỏng. **Step 2, 5, 6 chưa chạy được: máy chưa có PostgreSQL** (không có Docker,
-> không có psql). Chạy lại khi có database bằng `melos exec --scope=api -- dart test --tags=integration`.
+> CLI mỏng. Test tích hợp chạy trên database **riêng** `recipe_test` (đổi bằng
+> `PGDATABASE_TEST`), vì helper test xoá sạch schema mỗi lần chạy. Test tích hợp đã
+> bắt được một lỗi thật: `tx.execute` mặc định dùng extended protocol nên không chạy
+> được tệp SQL nhiều lệnh — migration phải chạy với `QueryMode.simple`.
 
-- [ ] **Step 2: Chạy để xác nhận nó fail** *(chờ PostgreSQL)*
+- [x] **Step 2: Chạy để xác nhận nó fail**
 
 Run: `docker compose up -d db && melos run test:integration`
 Expected: FAIL — `runMigrations` chưa tồn tại.
@@ -255,12 +257,12 @@ Future<void> runMigrations(Connection conn, String dir) async {
 }
 ```
 
-- [ ] **Step 5: Chạy test để xác nhận pass** *(chờ PostgreSQL)*
+- [x] **Step 5: Chạy test để xác nhận pass**
 
 Run: `melos run test:integration`
 Expected: PASS.
 
-- [ ] **Step 6: Kiểm tra `immutable_unaccent` hoạt động với tiếng Việt** *(chờ PostgreSQL — đã có test `@integration` thay cho lệnh psql thủ công)*
+- [x] **Step 6: Kiểm tra `immutable_unaccent` hoạt động với tiếng Việt** *(`psql -d recipe -tAc "SELECT immutable_unaccent('Phở Bò')"` → `pho bo`; đã có thêm test `@integration` chốt luôn hành vi này)*
 
 Run: `docker compose exec db psql -U app -d recipe -c "SELECT immutable_unaccent('Phở Bò');"`
 Expected: `pho bo`
@@ -901,10 +903,15 @@ Mỗi BR và mỗi ADR thuộc **đúng một** task.
 
 ```
 melos run analyze           # dart analyze toàn monorepo, --fatal-infos
-melos run test              # unit + widget, không cần hạ tầng
-docker compose up -d db
+melos run test              # unit, không cần hạ tầng (đã loại tag integration)
+melos run test:widget       # widget test của apps/app
+docker compose up -d db     # hoặc PostgreSQL cài trực tiếp trên máy
 melos run test:integration  # repository chạy trên PostgreSQL thật
 ```
+
+Máy dev hiện tại dùng PostgreSQL 16 cài bằng Homebrew thay cho Docker:
+`brew services start postgresql@16`, role `app` (mật khẩu `app`), database `recipe`
+cho dev và `recipe_test` cho test tích hợp.
 
 ## Việc còn treo trước khi bắt tay
 
