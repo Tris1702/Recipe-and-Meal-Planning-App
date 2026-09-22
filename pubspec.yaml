@@ -24,8 +24,8 @@ melos:
       description: Phân tích tĩnh toàn monorepo, coi info là lỗi.
       run: melos exec -- dart analyze --fatal-infos
     test:
-      description: Unit test các package Dart thuần.
-      run: melos exec --dir-exists=test --no-flutter -- dart test
+      description: Unit test các package Dart thuần, không cần hạ tầng.
+      run: melos exec --dir-exists=test --no-flutter -- dart test --exclude-tags=integration
     test:widget:
       description: Widget test cho ứng dụng Flutter.
       run: melos exec --dir-exists=test --flutter -- flutter test
