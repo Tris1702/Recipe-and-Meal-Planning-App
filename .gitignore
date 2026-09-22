@@ -1,0 +1,27 @@
+# Dart / Flutter
+.dart_tool/
+.packages
+build/
+pubspec_overrides.yaml
+*.log
+
+# Melos
+.melos_tool/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# macOS
+.DS_Store
+
+# Flutter platform build output
+apps/app/.flutter-plugins
+apps/app/.flutter-plugins-dependencies
+apps/app/ios/Pods/
+apps/app/android/.gradle/
+
+# Local env
+.env
+.env.local
