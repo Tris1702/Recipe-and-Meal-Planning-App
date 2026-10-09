@@ -48,14 +48,15 @@ theo của pipeline nếu muốn khoá hành vi thành living docs trước khi 
 
 ## Trạng thái và bước tiếp theo
 
-Cả năm tài liệu đang ở `status: draft`. Theo pipeline, **chỉ người dùng** mới được đổi sang `ready`, và
-`exec-plan` chỉ chạy khi spec + tech-design + plan đều `ready`.
+Đang làm theo [05-implementation-plan.md](./05-implementation-plan.md) (rev 3). Tiến độ từng task xem ở
+[`../task_managements/process_task.md`](../task_managements/process_task.md) (BE-0.1 đã xong). 01–04 giữ ở
+`status: draft` và chỉ dùng để tham khảo.
 
-Việc còn treo trước khi viết dòng code đầu tiên:
+Việc còn treo:
 
-| # | Việc | Chặn gì |
-|---|------|---------|
-| TQ-02 | Chốt nguồn dữ liệu dinh dưỡng nguyên liệu Việt | Lát cắt dinh dưỡng và cold start |
-| TQ-01 | Chọn nhà cung cấp object storage và email | Ảnh công thức, đặt lại mật khẩu |
-| TQ-03 | Chọn nơi triển khai | Chỉ khâu deploy |
-| TQ-04 | Có chạy `to-bdd` trước khi code không | Hình dạng khâu test E2E |
+| # | Việc | Trạng thái |
+|---|------|-----------|
+| TQ-02 | Nguồn dữ liệu dinh dưỡng nguyên liệu Việt | Tạm dùng USDA + Bảng thành phần thực phẩm VN cho danh mục trong migration `0002`; cần chốt nếu mở rộng danh mục |
+| TQ-03 | Chọn nơi triển khai | Còn mở; OPS-1 mới chỉ chạy bằng Docker Compose |
+| TQ-01 | Object storage và email | Ngoài phạm vi bản này (không có ảnh, quên mật khẩu) |
+| TQ-04 | Chạy `to-bdd` trước khi code | Chưa chạy; hiện test viết theo mục "Xong khi" của từng task |

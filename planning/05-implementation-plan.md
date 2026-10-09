@@ -71,8 +71,10 @@ src/
   toàn bộ.
 - **Đơn vị:** API dùng gram cho cân nặng (`weight_g`), cm cho chiều cao, kcal cho calo, VND cho giá.
   Giao diện hiển thị cân nặng theo kg, làm tròn 1 chữ số thập phân.
-- **Thời gian:** `eaten_at` là giờ địa phương của người dùng, không kèm múi giờ. "Ngày" của bữa ăn là
-  `eaten_at::date`.
+- **Thời gian:** `eaten_at`, `recorded_at` là giờ địa phương của người dùng (Việt Nam), kiểu `timestamp` không kèm
+  múi giờ. Migration `0001` đặt múi giờ DB là `Asia/Ho_Chi_Minh` để `DEFAULT now()` cũng ra giờ Việt Nam (kể cả
+  khi Postgres chạy UTC). "Ngày" của bữa ăn là `eaten_at::date`; khi lọc theo ngày thì viết thành khoảng
+  `eaten_at >= :d AND eaten_at < :d + 1` để dùng được index `meals(user_id, eaten_at)`.
 - **Danh sách có phân trang** `?page=1&size=20`, size tối đa 50. Response: `{"items": [...], "total": n}`.
 - **Công thức tính** (dùng chung BE và FE, chỉ BE tính, FE hiển thị):
   - Một dòng nguyên liệu: `calo = quantity / measurement × calories`, `giá = quantity / measurement × price`.
@@ -131,13 +133,13 @@ DailySummary   {date, goal_calories, total_calories, remaining_calories,
 
 ## BE
 
-### [x] BE-0.1 · Chuẩn hoá schema và migration
+### [ ] BE-0.1 · Chuẩn hoá schema và migration
 
 **Input:** `init_tables_recipe.sql` (schema gốc, có lỗi), DB local đang chạy.
 
 **Việc cần làm:**
-- Dựng Alembic trong `src/backend`: `migrations/env.py` lấy kết nối từ `.env` (`DB_HOST`, `DB_NAME`, `DB_USER`,
-  `DB_PASSWORD`), bật `transaction_per_migration=True` để mỗi revision chạy trong một transaction riêng.
+- Dựng Alembic trong `src/backend`: `migrations/env.py` lấy kết nối từ `.env` (`DB_HOST`, `DB_PORT` (mặc định
+  5432), `DB_NAME`, `DB_USER`, `DB_PASSWORD`), in DB đích trước khi chạy, bật `transaction_per_migration=True` để mỗi revision chạy trong một transaction riêng.
   Không dùng autogenerate (không có model SQLAlchemy); mỗi revision trong `migrations/versions/` chạy một file
   SQL viết tay trong `migrations/sql/` và có `downgrade()`.
 - Đưa `init_tables_recipe.sql` thành `migrations/sql/0001_init.sql`, sửa luôn trong file đó:
@@ -145,7 +147,8 @@ DailySummary   {date, goal_calories, total_calories, remaining_calories,
   - `auths.username` thêm `UNIQUE`.
   - Đổi tên `user_heath_records` → `user_health_records`, bỏ `UNIQUE` ở `user_id`, thêm
     `recorded_at timestamp NOT NULL DEFAULT now()`.
-  - `users.birth_date` → `date`; `users.created_at` → `NOT NULL`.
+  - `users.birth_date` → `date`; `users.created_at` → `NOT NULL`. `users.height_cm`, `weight_g`,
+    `daily_calorie_goals`, `user_health_records.weight_g` thêm `CHECK (> 0)` (khoảng hợp lệ cụ thể kiểm ở app).
   - `recipes` thêm `user_id integer NOT NULL REFERENCES users(id)` và `created_at`, `updated_at`; `name` → `NOT NULL`.
   - `meals.meal_type` → `NOT NULL`.
   - `meal_items` thêm `portion decimal NOT NULL DEFAULT 1 CHECK (portion > 0)`.
@@ -153,12 +156,15 @@ DailySummary   {date, goal_calories, total_calories, remaining_calories,
   - Khoá ngoại khai báo ngay tại cột, không `DEFERRABLE`. `recipe_items.recipe_id`, `meal_items.meal_id` →
     `ON DELETE CASCADE`; các khoá khác giữ mặc định (chặn xoá dòng cha đang được dùng, ví dụ công thức đã có
     trong bữa ăn).
-  - Index thường (không `UNIQUE`): `recipes(user_id)`, `meals(user_id, eaten_at)`,
-    `user_health_records(user_id, recorded_at)`, `recipe_items(product_nutrition_id)`, `meal_items(recipe_id)`.
+  - Index thường (không `UNIQUE`), đặt tên rõ: `recipes(user_id, updated_at DESC, id DESC)`,
+    `meals(user_id, eaten_at)`, `user_health_records(user_id, recorded_at)`, `recipe_items(product_nutrition_id)`,
+    `meal_items(meal_id)`, `meal_items(recipe_id)`.
+  - Đặt múi giờ DB `Asia/Ho_Chi_Minh` (xem mục 3, Thời gian).
   - Trigger `set_updated_at` tự gán `updated_at = now()` khi UPDATE `recipes`, `user_health_records`.
 - `migrations/sql/0002_products.sql`: danh mục nguyên liệu dùng chung (29 nguyên liệu, 32 định lượng), chạy ở
   mọi môi trường.
 - `scripts/seed_dev.py`: dữ liệu mẫu chỉ cho dev (tài khoản `hoa.ctp`, 15 công thức, lịch sử cân nặng, bữa ăn).
+  Mật khẩu lấy từ `SEED_DEV_PASSWORD` (mặc định `matkhau123`) và hash lúc chạy, không lưu hash trong repo.
   Chạy lại khi tài khoản đã có thì bỏ qua.
 - DB local cũ: drop rồi chạy lại từ đầu (toàn bộ dữ liệu cũ đã nằm trong `0002` và `seed_dev.py`).
 
@@ -167,7 +173,9 @@ DailySummary   {date, goal_calories, total_calories, remaining_calories,
 
 **Xong khi:**
 - `uv run alembic upgrade head` trên DB trống chạy hết không lỗi. Chạy lần hai không có gì mới.
-- `uv run alembic downgrade base` đưa DB về trống (không sót bảng, kiểu enum, function), rồi `upgrade head` lại được.
+- Trên DB chưa chạy `seed_dev`: `uv run alembic downgrade base` đưa DB về trống (không sót bảng, kiểu enum,
+  function, cấu hình múi giờ), rồi `upgrade head` lại được. Đã chạy `seed_dev` thì `downgrade` của `0002` báo lỗi
+  (cố ý, không xoá ngầm công thức của user); muốn làm lại thì drop DB.
 - Insert 2 dòng `auths` cùng username → lỗi unique; insert `meals` thiếu `meal_type` → lỗi not null.
 - `init_tables_recipe.sql` ở gốc repo đã xoá, schema chỉ còn một nguồn là `migrations/sql/`.
 
@@ -176,10 +184,10 @@ DailySummary   {date, goal_calories, total_calories, remaining_calories,
 **Input:** code backend hiện tại; review auth ngày 2026-10-08.
 
 **Việc cần làm:**
-- `app/core/config.py`: đọc env bằng `pydantic-settings`, **fail ngay khi khởi động** nếu thiếu biến. Biến DB đã
-  đổi tên thành `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` ở BE-0.1; `app/db/database.py` và
-  `migrations/env.py` chuyển sang đọc từ config này.
-  Chỉ chấp nhận `JWT_ALGORITHM` ∈ {HS256, HS384, HS512}, `JWT_SECRET_KEY` dài ≥ 32 ký tự.
+- `app/core/config.py`: đọc env bằng `pydantic-settings`, **fail ngay khi khởi động** nếu thiếu biến. Tên biến đã
+  chốt ở BE-0.1: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`,
+  `ACCESS_TOKEN_EXPIRE_MINUTES`; `app/db/database.py`, `auth_service.py` và `migrations/env.py` chuyển sang đọc
+  từ config này. Chỉ chấp nhận `JWT_ALGORITHM` ∈ {HS256, HS384, HS512}, `JWT_SECRET_KEY` dài ≥ 32 ký tự.
 - Thêm `.env.example` liệt kê đủ biến, không có giá trị thật.
 - `app/core/errors.py`: exception handler chung — `AppException(status_code, message)` → JSON `{"detail": ...}`.
   Lỗi không lường trước → `logger.exception(...)` + 500. Bỏ các `try/except` trả `Response` trong router.
