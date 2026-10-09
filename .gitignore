@@ -5,9 +5,6 @@ build/
 pubspec_overrides.yaml
 *.log
 
-# Melos
-.melos_tool/
-
 # IDE
 .idea/
 .vscode/
@@ -25,3 +22,13 @@ apps/app/android/.gradle/
 # Local env
 .env
 .env.local
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+
+# Sinh ra bởi task_managements/tasks.mjs build
+task_managements/board.html
