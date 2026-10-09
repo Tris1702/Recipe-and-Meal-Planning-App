@@ -1,3 +1,0 @@
-tags:
-  integration:
-    # Cần PostgreSQL thật: docker compose up -d db
