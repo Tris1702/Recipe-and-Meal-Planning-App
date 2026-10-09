@@ -1,923 +1,607 @@
 ---
 doc-id: 2026-09-22-recipe-meal-planning-mvp
 status: draft
+revision: 3 — 2026-10-09, migration bằng Alembic; schema chuẩn ở `src/backend/migrations/sql/0001_init.sql`
 inputs:
-  - ./01-spec.md (draft)
-  - ./02-tech-design.md (draft)
-  - ./03-database.md (draft)
-  - ./04-mock-ui.md (draft)
+  - ../src/backend/migrations/sql/0001_init.sql (schema chuẩn, thay cho `init_tables_recipe.sql` đã xoá)
+  - ./01-spec.md, ./04-mock-ui.md (chỉ tham khảo — phạm vi đã thu hẹp, xem mục 1)
 ---
 
-# Recipe & Meal Planning App — Implementation Plan
+# Recipe & Meal Planning App — Danh sách task
 
-> **Mức chi tiết.** Task 1–6 viết đầy đủ step 2–5 phút kèm code, làm khuôn mẫu cho cả dự án.
-> Task 7–65 là **task card**: tệp phải chạm, interface, BR sở hữu, trọng tâm test, tiêu chí xong.
-> Khi bắt đầu một lát cắt, chạy `/to-plan` cho riêng lát đó để bung task card thành step có code.
-> Lý do chia hai mức: viết sẵn code cho 65 task là đoán trước quyết định sẽ lỗi thời ngay sau lát cắt đầu.
+> **Cách đọc.** Mỗi task có **Input** (cần gì để bắt đầu), **Output** (bàn giao gì), **File**, và **Xong khi**
+> (cách kiểm tra). Đánh `[x]` vào ô ở đầu task khi xong. Làm theo thứ tự lát cắt: trong mỗi lát, làm
+> **BE → Web → App**. Xong một lát là demo được trọn vẹn tính năng đó trên cả ba.
+>
+> Bản này thay cho plan Dart Frog cũ (revision 1, vẫn còn trong git history).
 
-**Goal:** Dựng MVP quản lý công thức, lập kế hoạch bữa ăn, dinh dưỡng và tủ đồ, chạy trên iOS, Android và Web
-từ một codebase Flutter, với backend Dart Frog và PostgreSQL.
+## 1. Phạm vi
 
-**Architecture:** Monorepo Dart bốn package (`shared`, `api_client`, `apps/api`, `apps/app`). API ba lớp
-route → service → repository, SQL viết tay. Dinh dưỡng denormalized vào mục lịch nên mục quá khứ tự đóng băng.
-Chi tiết: [02-tech-design.md](./02-tech-design.md).
+Phạm vi bám theo các bảng trong `src/backend/migrations/sql/0001_init.sql` (viết lại từ `init_tables_recipe.sql` cũ):
 
-**Tech Stack:** Dart 3.x · Flutter 3.x (iOS/Android/Web CanvasKit) · Dart Frog · PostgreSQL 16 (unaccent,
-pg_trgm, citext) · Riverpod · go_router · melos · Docker.
+| Có làm | Nguồn dữ liệu |
+|--------|---------------|
+| Đăng ký, đăng nhập, hồ sơ người dùng, mục tiêu calo | `auths`, `users` |
+| Lịch sử cân nặng | `user_health_records` (bảng cũ `user_heath_records` đã đổi tên) |
+| Danh mục nguyên liệu dùng chung, mỗi nguyên liệu có nhiều mức định lượng (calo, giá) | `products`, `product_nutritions` |
+| Công thức riêng của từng user, gồm nhiều nguyên liệu | `recipes`, `recipe_items` |
+| Nhật ký bữa ăn: bữa nào, lúc nào, ăn món gì | `meals`, `meal_items` |
+| Tổng calo theo ngày so với mục tiêu | tính từ các bảng trên |
 
-## Global Constraints
+**Không làm ở bản này** (có trong spec cũ nhưng schema không có): macro đạm/tinh bột/béo, tag, tìm kiếm không dấu,
+nháp công thức, ảnh, tủ đồ (pantry), sao chép tuần, quên mật khẩu, refresh token, idempotency key.
 
-Mọi task đều chịu các ràng buộc sau; reviewer đọc chúng như thấu kính cho từng task.
+## 2. Stack và cấu trúc thư mục
 
-- Một codebase Flutter duy nhất cho iOS, Android và Web — không có codebase riêng cho web (`NFR-platform-001`).
-- Ba dải bề rộng: `< 600` / `600–1024` / `> 1024` dp; không chức năng nào chỉ dùng được ở một dải (`NFR-platform-002`).
-- Online-only: client không cache đọc, không ghi offline. Ngoại lệ duy nhất có chủ ý là **trạng thái nháp lưu trên máy chủ** (`BR-recipe-005`).
-- Mọi danh sách trả về từ máy chủ phân trang, trần 50 bản ghi mỗi trang (`NFR-perf-002`).
-- Mọi thao tác tạo nhận `Idempotency-Key` và phát lại response khi khoá lặp (`NFR-sec-003`).
-- Mọi truy vấn dữ liệu người dùng mang điều kiện `user_id = :me`; không endpoint nào tiết lộ sự tồn tại của dữ liệu thuộc tài khoản khác (`BR-auth-001`).
-- Mọi truy vấn công thức mang `deleted_at IS NULL` (ADR-007).
-- Chỉ số dinh dưỡng đúng bốn loại: calo, đạm, tinh bột, chất béo (`BR-nutrition-001`).
-- Cộng dồn dinh dưỡng trên giá trị chưa làm tròn; chỉ làm tròn ở con số cuối trình bày (`BR-nutrition-009`).
-- Ngày trong kế hoạch bữa ăn là ngày lịch thuần, không giờ, không múi giờ (`BR-mealplan-001`).
-- Nội dung tài liệu và nhãn giao diện bằng tiếng Việt; tên biến, hàm, bảng, cột bằng tiếng Anh.
-
-## Thứ tự lát cắt
+| Phần | Công nghệ |
+|------|-----------|
+| Backend | Python 3.12, FastAPI, psycopg2 (SQL viết tay), argon2-cffi, PyJWT, pytest; quản lý bằng `uv` |
+| Migration | Alembic; mỗi revision chạy một file SQL viết tay (SQLAlchemy chỉ dùng để kết nối, không có model) |
+| Database | PostgreSQL 16 |
+| Web | Vue 3 + Vite + TypeScript, Vue Router, Pinia, axios |
+| App | Flutter 3.x (iOS + Android), Riverpod, go_router, dio, flutter_secure_storage |
 
 ```
-Phase 0 Nền móng  →  A Auth  →  B Nguyên liệu  →  C Công thức  →  D Tìm kiếm
-                                                       ↓
-                        H Cold start  ←  G Pantry  ←  F Kế hoạch  ←  E Dinh dưỡng
+src/
+  backend/                  # FastAPI (đã có)
+    app/
+      core/                 # config, exception, security (get_current_user)
+      db/                   # database.py
+      routers/              # 1 file mỗi resource; request/ chứa request model
+      schemas/              # response model
+      services/             # nghiệp vụ + SQL
+    migrations/             # Alembic: env.py, versions/ (revision), sql/ (SQL của từng revision)
+    scripts/                # seed_dev.py (dữ liệu mẫu cho dev)
+    tests/
+  frontend/
+    web/                    # Vue
+    app/                    # Flutter
 ```
 
-Mỗi lát cắt chạy hết từ schema tới màn hình và demo được độc lập. Lát B phải xong trước C vì công thức
-buộc trỏ vào danh mục nguyên liệu (`BR-recipe-006`). Lát E xong trước F vì mục lịch cần dinh dưỡng mỗi khẩu
-phần để denormalize (ADR-004). Lát H nằm cuối vì nó phụ thuộc **TQ-02** (nguồn dữ liệu dinh dưỡng).
+## 3. Quy ước chung (áp cho mọi task)
+
+- **Một user chỉ thấy dữ liệu của mình.** Mọi truy vấn `recipes`, `meals`, `user_health_records` đều có
+  `user_id = <user đang đăng nhập>`. Truy cập bản ghi của người khác trả **404** (không phải 403), để không lộ
+  việc bản ghi đó tồn tại.
+- **Mọi route trừ `/sign-up`, `/login`, `/health` đều cần header `Authorization: Bearer <token>`.** Thiếu hoặc
+  sai token → 401.
+- **Lỗi trả JSON** `{"detail": "<thông điệp>"}`. 400 sai dữ liệu nghiệp vụ, 401 chưa đăng nhập, 404 không thấy,
+  409 trùng hoặc xung đột, 422 sai kiểu dữ liệu (FastAPI tự sinh).
+- **Ghi nhiều bảng thì phải trong một transaction** (`with cursor.connection:`). Lỗi ở bước nào thì rollback
+  toàn bộ.
+- **Đơn vị:** API dùng gram cho cân nặng (`weight_g`), cm cho chiều cao, kcal cho calo, VND cho giá.
+  Giao diện hiển thị cân nặng theo kg, làm tròn 1 chữ số thập phân.
+- **Thời gian:** `eaten_at` là giờ địa phương của người dùng, không kèm múi giờ. "Ngày" của bữa ăn là
+  `eaten_at::date`.
+- **Danh sách có phân trang** `?page=1&size=20`, size tối đa 50. Response: `{"items": [...], "total": n}`.
+- **Công thức tính** (dùng chung BE và FE, chỉ BE tính, FE hiển thị):
+  - Một dòng nguyên liệu: `calo = quantity / measurement × calories`, `giá = quantity / measurement × price`.
+    `quantity` tính theo cùng đơn vị `measure_unit` của định lượng.
+  - Ví dụ: định lượng "Ức gà, gram, 100, 165 kcal, 12.000đ", `quantity = 250` → **412,5 kcal**, **30.000đ**.
+  - Một công thức = tổng các dòng. Một món trong bữa = calo công thức × `portion` (ví dụ `0.5` = ăn nửa công thức).
+  - Cộng trên số chưa làm tròn, chỉ làm tròn khi hiển thị (calo làm tròn đơn vị, giá làm tròn nghìn).
+- Nhãn giao diện tiếng Việt. Tên biến, hàm, bảng, cột tiếng Anh.
+
+## 4. Hợp đồng API
+
+| Method | Path | Body / Query | Response | Task |
+|--------|------|--------------|----------|------|
+| GET | `/health` | — | `{"status":"ok"}` | BE-0.2 |
+| POST | `/sign-up` | `{username, password, confirm_password}` | 201 `{id}` | BE-A1 |
+| POST | `/login` | `{username, password}` | 200 `{access_token, token_type}` | BE-A1 |
+| GET | `/me` | — | `User` | BE-A2 |
+| PATCH | `/me` | các trường hồ sơ (gửi trường nào sửa trường đó) | `User` | BE-B1 |
+| GET | `/me/health-records` | `?from&to` (ngày) | `[{id, weight_g, recorded_at}]` | BE-B2 |
+| POST | `/me/health-records` | `{weight_g, recorded_at?}` | 201 `HealthRecord` | BE-B2 |
+| DELETE | `/me/health-records/{id}` | — | 204 | BE-B2 |
+| GET | `/products` | `?q&page&size` | `{items:[Product], total}` | BE-C1 |
+| GET | `/products/{id}` | — | `Product` + `nutritions[]` | BE-C1 |
+| GET | `/recipes` | `?q&page&size` | `{items:[RecipeSummary], total}` | BE-D1 |
+| POST | `/recipes` | `RecipeInput` | 201 `RecipeDetail` | BE-D1 |
+| GET | `/recipes/{id}` | — | `RecipeDetail` | BE-D1 |
+| PUT | `/recipes/{id}` | `RecipeInput` | `RecipeDetail` | BE-D1 |
+| DELETE | `/recipes/{id}` | — | 204, hoặc 409 nếu đang dùng trong bữa ăn | BE-D1 |
+| GET | `/meals` | `?date=YYYY-MM-DD` | `[MealDetail]` | BE-E1 |
+| POST | `/meals` | `MealInput` | 201 `MealDetail` | BE-E1 |
+| PUT | `/meals/{id}` | `MealInput` | `MealDetail` | BE-E1 |
+| DELETE | `/meals/{id}` | — | 204 | BE-E1 |
+| GET | `/me/daily-summary` | `?date=YYYY-MM-DD` | `DailySummary` | BE-E2 |
+
+Kiểu dữ liệu:
+
+```text
+User           {id, name, birth_date (YYYY-MM-DD), gender, height_cm, weight_g, daily_calorie_goals, created_at}
+Product        {id, name}
+Nutrition      {id, measure_unit, measurement, calories, price}
+RecipeInput    {name, detail_recipe, items: [{product_nutrition_id, quantity}]}
+RecipeSummary  {id, name, total_calories, total_price}
+RecipeDetail   {id, name, detail_recipe, total_calories, total_price,
+                items: [{id, product_id, product_name, product_nutrition_id,
+                         measure_unit, measurement, quantity, calories, price}]}
+MealInput      {meal_type, eaten_at, items: [{recipe_id, portion}]}
+MealDetail     {id, meal_type, eaten_at, total_calories,
+                items: [{id, recipe_id, recipe_name, portion, calories}]}
+DailySummary   {date, goal_calories, total_calories, remaining_calories,
+                by_meal_type: {breakfast, lunch, dinner, snack}}
+```
 
 ---
 
 # Phase 0 — Nền móng
 
-## Task 1: Dựng monorepo bốn package
+## BE
 
-**Files:**
-- Create: `melos.yaml`, `pubspec.yaml`, `analysis_options.yaml`, `.gitignore`
-- Create: `packages/shared/pubspec.yaml`, `packages/shared/lib/shared.dart`
-- Create: `packages/api_client/pubspec.yaml`, `apps/api/pubspec.yaml`, `apps/app/pubspec.yaml`
-- Create: `docker-compose.yml` (PostgreSQL 16 cho test)
+### [x] BE-0.1 · Chuẩn hoá schema và migration
 
-**Interfaces:**
-- Produces: các lệnh `melos run analyze`, `melos run test`, `melos run test:integration` mà mọi task sau đều dùng.
+**Input:** `init_tables_recipe.sql` (schema gốc, có lỗi), DB local đang chạy.
 
-**Owns:** `@ADR-001`
+**Việc cần làm:**
+- Dựng Alembic trong `src/backend`: `migrations/env.py` lấy kết nối từ `.env` (`DB_HOST`, `DB_NAME`, `DB_USER`,
+  `DB_PASSWORD`), bật `transaction_per_migration=True` để mỗi revision chạy trong một transaction riêng.
+  Không dùng autogenerate (không có model SQLAlchemy); mỗi revision trong `migrations/versions/` chạy một file
+  SQL viết tay trong `migrations/sql/` và có `downgrade()`.
+- Đưa `init_tables_recipe.sql` thành `migrations/sql/0001_init.sql`, sửa luôn trong file đó:
+  - Mọi `id` → `integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY`.
+  - `auths.username` thêm `UNIQUE`.
+  - Đổi tên `user_heath_records` → `user_health_records`, bỏ `UNIQUE` ở `user_id`, thêm
+    `recorded_at timestamp NOT NULL DEFAULT now()`.
+  - `users.birth_date` → `date`; `users.created_at` → `NOT NULL`.
+  - `recipes` thêm `user_id integer NOT NULL REFERENCES users(id)` và `created_at`, `updated_at`; `name` → `NOT NULL`.
+  - `meals.meal_type` → `NOT NULL`.
+  - `meal_items` thêm `portion decimal NOT NULL DEFAULT 1 CHECK (portion > 0)`.
+  - `recipe_items.quantity`, `product_nutritions.measurement` thêm `CHECK (> 0)`; `calories`, `price` thêm `CHECK (>= 0)`.
+  - Khoá ngoại khai báo ngay tại cột, không `DEFERRABLE`. `recipe_items.recipe_id`, `meal_items.meal_id` →
+    `ON DELETE CASCADE`; các khoá khác giữ mặc định (chặn xoá dòng cha đang được dùng, ví dụ công thức đã có
+    trong bữa ăn).
+  - Index thường (không `UNIQUE`): `recipes(user_id)`, `meals(user_id, eaten_at)`,
+    `user_health_records(user_id, recorded_at)`, `recipe_items(product_nutrition_id)`, `meal_items(recipe_id)`.
+  - Trigger `set_updated_at` tự gán `updated_at = now()` khi UPDATE `recipes`, `user_health_records`.
+- `migrations/sql/0002_products.sql`: danh mục nguyên liệu dùng chung (29 nguyên liệu, 32 định lượng), chạy ở
+  mọi môi trường.
+- `scripts/seed_dev.py`: dữ liệu mẫu chỉ cho dev (tài khoản `hoa.ctp`, 15 công thức, lịch sử cân nặng, bữa ăn).
+  Chạy lại khi tài khoản đã có thì bỏ qua.
+- DB local cũ: drop rồi chạy lại từ đầu (toàn bộ dữ liệu cũ đã nằm trong `0002` và `seed_dev.py`).
 
-- [x] **Step 1: Khởi tạo git và bộ khung thư mục**
+**Output:** `alembic.ini`, `migrations/` (`env.py`, `versions/0001_init.py`, `versions/0002_seed_products.py`,
+`sql/0001_init.sql`, `sql/0002_products.sql`), `scripts/seed_dev.py`, DB local đúng schema mới.
 
-```bash
-cd /Users/hoa.ctp/Project/my_project/recipe_and_meal_planning_app
-git init
-mkdir -p packages/shared/lib packages/api_client/lib apps/api apps/app db/migrations
-```
+**Xong khi:**
+- `uv run alembic upgrade head` trên DB trống chạy hết không lỗi. Chạy lần hai không có gì mới.
+- `uv run alembic downgrade base` đưa DB về trống (không sót bảng, kiểu enum, function), rồi `upgrade head` lại được.
+- Insert 2 dòng `auths` cùng username → lỗi unique; insert `meals` thiếu `meal_type` → lỗi not null.
+- `init_tables_recipe.sql` ở gốc repo đã xoá, schema chỉ còn một nguồn là `migrations/sql/`.
 
-- [x] **Step 2: Viết cấu hình melos**
+### [ ] BE-0.2 · Dọn nền backend
 
-> **Đã chạy — lệch so với bản viết dưới đây.** Melos 8 không còn đọc `melos.yaml`;
-> cấu hình nằm ở mục `melos:` trong `pubspec.yaml` gốc, bốn package dùng Dart pub
-> workspace (`resolution: workspace`, SDK `^3.9.0`). Script `test` thêm
-> `--exclude-tags=integration` và có thêm `test:widget` chạy `flutter test`, vì
-> `dart test` không chạy được package Flutter.
+**Input:** code backend hiện tại; review auth ngày 2026-10-08.
 
-```yaml
-name: recipe_meal_planner
-packages:
-  - packages/**
-  - apps/**
+**Việc cần làm:**
+- `app/core/config.py`: đọc env bằng `pydantic-settings`, **fail ngay khi khởi động** nếu thiếu biến. Biến DB đã
+  đổi tên thành `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` ở BE-0.1; `app/db/database.py` và
+  `migrations/env.py` chuyển sang đọc từ config này.
+  Chỉ chấp nhận `JWT_ALGORITHM` ∈ {HS256, HS384, HS512}, `JWT_SECRET_KEY` dài ≥ 32 ký tự.
+- Thêm `.env.example` liệt kê đủ biến, không có giá trị thật.
+- `app/core/errors.py`: exception handler chung — `AppException(status_code, message)` → JSON `{"detail": ...}`.
+  Lỗi không lường trước → `logger.exception(...)` + 500. Bỏ các `try/except` trả `Response` trong router.
+- Thay `print` bằng `logging`. Bỏ log có chứa password hash.
+- `main.py`: bỏ `connect_to_database()` lúc import; dùng `psycopg2.pool.SimpleConnectionPool` mở trong
+  `lifespan`; thêm CORS cho origin web (`http://localhost:5173`); thêm `GET /health`.
+- Route nào gọi DB thì dùng `def`, không dùng `async def`.
+- Thiết lập test: `pytest`, `httpx`, DB test riêng (`DB_NAME=recipe_test`); fixture chạy `alembic upgrade head`
+  (qua `alembic.command.upgrade`) lên DB test một lần mỗi phiên, mỗi test chạy trong transaction rồi rollback.
+  Không chạy `seed_dev.py` cho test: test tự tạo dữ liệu mình cần.
 
-command:
-  bootstrap:
-    runPubGetInParallel: true
+**Output:** `app/core/config.py`, `app/core/errors.py`, `.env.example`, `tests/conftest.py`, `pyproject.toml` có
+nhóm dev `pytest`.
 
-scripts:
-  analyze:
-    run: melos exec -- dart analyze --fatal-infos
-  test:
-    run: melos exec --dir-exists=test -- dart test
-  test:integration:
-    run: melos exec --scope=api -- dart test --tags=integration
-```
+**Xong khi:**
+- Xoá `JWT_SECRET_KEY` khỏi `.env` → app không khởi động được, báo rõ thiếu biến nào.
+- `uv run pytest` chạy được, có test `GET /health` → 200.
 
-- [x] **Step 3: Viết `packages/shared/pubspec.yaml`**
+## Web
 
-```yaml
-name: shared
-description: Model và luật validate dùng chung cho api và app.
-publish_to: none
-environment:
-  sdk: ^3.5.0
-dev_dependencies:
-  test: ^1.25.0
-  lints: ^4.0.0
-```
+### [ ] WEB-0.1 · Khởi tạo dự án Vue
 
-- [x] **Step 4: Viết `docker-compose.yml`**
+**Input:** BE-0.2 xong (có CORS và `/health`).
 
-```yaml
-services:
-  db:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-      POSTGRES_DB: recipe
-    ports: ["5432:5432"]
-```
+**Việc cần làm:**
+- `npm create vue@latest src/frontend/web` (chọn TypeScript, Router, Pinia, Vitest, ESLint).
+- `src/api/http.ts`: axios instance, `baseURL` lấy từ `VITE_API_URL`; interceptor gắn `Authorization` nếu có token;
+  nhận 401 → xoá token, chuyển về `/login`.
+- Layout chung: thanh điều hướng (Hôm nay, Bữa ăn, Công thức, Hồ sơ), vùng nội dung. Responsive ≥ 360px.
+- Trang `/` tạm gọi `/health` và hiện kết quả.
 
-- [x] **Step 5: Bootstrap và xác nhận toolchain chạy**
+**Output:** `src/frontend/web/` chạy được bằng `npm run dev`.
 
-Run: `dart pub global activate melos && melos bootstrap && melos run analyze`
-Expected: `analyze` chạy qua cả bốn package, 0 issue.
+**Xong khi:** mở `http://localhost:5173` thấy "API: ok". `npm run build` và `npm run test:unit` pass.
 
-- [x] **Step 6: Commit**
+## App
 
-```bash
-git add -A
-git commit -m "chore: scaffold melos monorepo with four packages"
-```
+### [ ] APP-0.1 · Khởi tạo dự án Flutter
 
----
+**Input:** BE-0.2 xong.
 
-## Task 2: Migration runner và migration 0001
+**Việc cần làm:**
+- `flutter create --platforms=ios,android src/frontend/app`.
+- Thêm `flutter_riverpod`, `go_router`, `dio`, `flutter_secure_storage`, `intl`.
+- `lib/core/api_client.dart`: dio với `baseUrl` từ `--dart-define=API_URL=...`; interceptor gắn token, 401 → đăng xuất.
+  Android emulator dùng `http://10.0.2.2:8000`.
+- Bottom navigation 4 tab (Hôm nay, Bữa ăn, Công thức, Hồ sơ). Tab đầu tạm gọi `/health`.
 
-**Files:**
-- Create: `apps/api/tool/migrate.dart`
-- Create: `db/migrations/0001_extensions_and_enums.sql`
-- Test: `apps/api/test/tool/migrate_test.dart`
+**Output:** `src/frontend/app/` chạy được trên emulator.
 
-**Interfaces:**
-- Produces: `dart run tool/migrate.dart up` — mọi task có migration đều dùng; bảng `schema_migrations` theo dõi version đã chạy.
-
-**Owns:** `@ADR-010`
-
-- [x] **Step 1: Viết test thất bại — chạy migration hai lần là idempotent**
-
-```dart
-// apps/api/test/tool/migrate_test.dart
-@Tags(['integration'])
-library;
-
-import 'package:test/test.dart';
-import 'package:postgres/postgres.dart';
-import '../../tool/migrate.dart';
-
-void main() {
-  test('chạy migration hai lần chỉ áp dụng một lần', () async {
-    final conn = await openTestConnection();
-    await runMigrations(conn, 'db/migrations');
-    final first = await conn.execute('SELECT count(*) FROM schema_migrations');
-
-    await runMigrations(conn, 'db/migrations');
-    final second = await conn.execute('SELECT count(*) FROM schema_migrations');
-
-    expect(second.first.first, equals(first.first.first));
-  });
-}
-```
-
-> **Đã chạy — lệch so với bản viết dưới đây.** Logic chọn và sắp xếp tệp migration
-> tách sang `apps/api/lib/src/db/migration_files.dart` (unit test, không cần database);
-> `runMigrations` ở `lib/src/db/migrator.dart` và trả về tên các migration vừa áp dụng
-> để test khẳng định idempotent qua giao diện công khai. `tool/migrate.dart` chỉ còn là
-> CLI mỏng. Test tích hợp chạy trên database **riêng** `recipe_test` (đổi bằng
-> `PGDATABASE_TEST`), vì helper test xoá sạch schema mỗi lần chạy. Test tích hợp đã
-> bắt được một lỗi thật: `tx.execute` mặc định dùng extended protocol nên không chạy
-> được tệp SQL nhiều lệnh — migration phải chạy với `QueryMode.simple`.
-
-- [x] **Step 2: Chạy để xác nhận nó fail**
-
-Run: `docker compose up -d db && melos run test:integration`
-Expected: FAIL — `runMigrations` chưa tồn tại.
-
-- [x] **Step 3: Viết `0001_extensions_and_enums.sql`**
-
-```sql
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS citext;
-CREATE EXTENSION IF NOT EXISTS unaccent;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-
-CREATE OR REPLACE FUNCTION immutable_unaccent(text)
-RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT AS
-$$ SELECT lower(public.unaccent('public.unaccent', $1)) $$;
-
-DO $$ BEGIN
-  CREATE TYPE recipe_status AS ENUM ('draft', 'published');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-  CREATE TYPE meal_slot AS ENUM ('breakfast', 'lunch', 'dinner', 'snack');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-  CREATE TYPE unit_dimension AS ENUM ('mass', 'volume', 'count');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-```
-
-- [x] **Step 4: Viết `migrate.dart`**
-
-```dart
-Future<void> runMigrations(Connection conn, String dir) async {
-  await conn.execute('''
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version integer PRIMARY KEY,
-      name text NOT NULL,
-      applied_at timestamptz NOT NULL DEFAULT now()
-    )''');
-
-  final applied = (await conn.execute('SELECT version FROM schema_migrations'))
-      .map((r) => r[0] as int).toSet();
-
-  final files = Directory(dir).listSync()
-      .whereType<File>()
-      .where((f) => f.path.endsWith('.sql'))
-      .toList()..sort((a, b) => a.path.compareTo(b.path));
-
-  for (final f in files) {
-    final name = f.uri.pathSegments.last;
-    final version = int.parse(name.split('_').first);
-    if (applied.contains(version)) continue;
-
-    await conn.runTx((tx) async {
-      await tx.execute(f.readAsStringSync());
-      await tx.execute(
-        r'INSERT INTO schema_migrations (version, name) VALUES ($1, $2)',
-        parameters: [version, name],
-      );
-    });
-    stdout.writeln('applied $name');
-  }
-}
-```
-
-- [x] **Step 5: Chạy test để xác nhận pass**
-
-Run: `melos run test:integration`
-Expected: PASS.
-
-- [x] **Step 6: Kiểm tra `immutable_unaccent` hoạt động với tiếng Việt** *(`psql -d recipe -tAc "SELECT immutable_unaccent('Phở Bò')"` → `pho bo`; đã có thêm test `@integration` chốt luôn hành vi này)*
-
-Run: `docker compose exec db psql -U app -d recipe -c "SELECT immutable_unaccent('Phở Bò');"`
-Expected: `pho bo`
-
-- [x] **Step 7: Commit**
-
-```bash
-git add apps/api/tool/migrate.dart db/migrations/0001_extensions_and_enums.sql apps/api/test/
-git commit -m "feat(db): migration runner and initial extensions"
-```
+**Xong khi:** app hiện "API: ok". `flutter analyze` và `flutter test` pass.
 
 ---
 
-## Task 3: Khung Dart Frog với error mapper
+# Lát A — Tài khoản
 
-**Files:**
-- Create: `apps/api/routes/_middleware.dart`, `apps/api/routes/health.dart`
-- Create: `apps/api/lib/src/middleware/error_mapper.dart`
-- Create: `apps/api/lib/src/error/app_exception.dart`
-- Test: `apps/api/test/middleware/error_mapper_test.dart`
+## BE
 
-**Interfaces:**
-- Produces: `AppException(code, httpStatus, message, details)` — mọi service ném exception này; `errorMapper()` middleware.
+### [ ] BE-A1 · Hoàn thiện đăng ký và đăng nhập
 
-**Owns:** `@ADR-002`
+**Input:** BE-0.1, BE-0.2; code hiện có ở `app/services/auth_service.py`, `app/routers/auth.py`.
 
-- [x] **Step 1: Viết test thất bại — exception nghiệp vụ thành JSON lỗi ổn định**
+**Rule:**
+- Username 3–30 ký tự, chỉ gồm `a-z 0-9 . _`, lưu dạng chữ thường. ✅ `Hoa.CTP` → lưu `hoa.ctp`. ❌ `ab`, `hoa ctp`.
+- Password 8–128 ký tự. `confirm_password` phải khớp.
+- Username đã tồn tại → 409. Hai lượt đăng ký cùng lúc cùng username: một lượt thành công, lượt kia 409 (bắt
+  `UniqueViolation`, không chỉ dựa vào câu SELECT kiểm tra trước).
+- Sai username hoặc password → cùng một thông điệp 401 "Sai tên đăng nhập hoặc mật khẩu".
+- Tạo `users` + `auths` trong một transaction (đã làm).
 
-```dart
-test('AppException được map thành khuôn lỗi chung', () async {
-  final handler = errorMapper().call((_) => throw AppException(
-        code: 'VALIDATION_FAILED', httpStatus: 422, message: 'Thiếu bước nấu'));
+**Output:** `POST /sign-up` → 201 `{id}`; `POST /login` → `{access_token, token_type: "bearer"}`, token hết hạn sau
+`ACCESS_TOKEN_EXPIRE_MINUTES`. Validate bằng `Field(...)` trong `routers/request/*.py`.
 
-  final res = await handler(_request());
+**Xong khi:** test trong `tests/test_auth.py` pass cho các trường hợp: đăng ký ok, trùng username, password ngắn,
+confirm sai, login ok, sai password, user không tồn tại, lỗi giữa chừng không để lại dòng `users` mồ côi.
 
-  expect(res.statusCode, 422);
-  expect(jsonDecode(await res.body())['error']['code'], 'VALIDATION_FAILED');
-});
-```
+### [ ] BE-A2 · Bảo vệ route bằng token
 
-- [x] **Step 2: Chạy để xác nhận fail**
+**Input:** BE-A1.
 
-Run: `melos run test`
-Expected: FAIL — `errorMapper` chưa tồn tại.
+**Việc cần làm:**
+- `app/core/security.py`: `get_current_user(token) -> CurrentUser(user_id)` dùng `HTTPBearer`, gọi
+  `decode_access_token` (đã có ở `auth_service`, trả `TokenClaims`). Token hết hạn / sai chữ ký / thiếu → 401 kèm header `WWW-Authenticate: Bearer`.
+- Token mang `sub = auth.id`; dependency tra ra `user_id` tương ứng.
+- `GET /me` trả `User`.
+- Gắn dependency vào router `products` và mọi router sau này.
 
-- [x] **Step 3: Viết `app_exception.dart` và `error_mapper.dart`**
+**Output:** `app/core/security.py`, `app/routers/me.py`.
 
-```dart
-class AppException implements Exception {
-  AppException({
-    required this.code,
-    required this.httpStatus,
-    required this.message,
-    this.details = const {},
-  });
-  final String code;
-  final int httpStatus;
-  final String message;
-  final Map<String, dynamic> details;
-}
+**Xong khi:** test: không token → 401; token hết hạn → 401; token hợp lệ → `/me` trả đúng user; `GET /products`
+không token → 401.
 
-Middleware errorMapper() => (handler) => (context) async {
-      try {
-        return await handler(context);
-      } on AppException catch (e) {
-        return Response.json(statusCode: e.httpStatus, body: {
-          'error': {'code': e.code, 'message': e.message, 'details': e.details},
-        });
-      } catch (e, st) {
-        log('unhandled', error: e, stackTrace: st);
-        return Response.json(statusCode: 500, body: {
-          'error': {'code': 'INTERNAL', 'message': 'Lỗi hệ thống', 'details': {}},
-        });
-      }
-    };
-```
+## Web
 
-- [x] **Step 4: Chạy test để xác nhận pass**
+### [ ] WEB-A1 · Màn đăng nhập và đăng ký
 
-Run: `melos run test`
-Expected: PASS.
+**Input:** BE-A1, BE-A2, WEB-0.1. Tham khảo wireframe S-01 trong [04-mock-ui.md](./04-mock-ui.md).
 
-- [x] **Step 5: Commit**
+**Việc cần làm:**
+- `views/LoginView.vue`, `views/RegisterView.vue`: validate giống rule BE-A1 ngay trên form; hiện lỗi từ `detail`.
+- `stores/auth.ts` (Pinia): `login()`, `register()`, `logout()`, `me`. Token lưu `localStorage`.
+- Router guard: chưa có token → chuyển `/login`; đã đăng nhập mà vào `/login` → chuyển `/`.
+- Đăng ký xong tự đăng nhập luôn.
 
-```bash
-git add apps/api/
-git commit -m "feat(api): dart frog skeleton with stable error envelope"
-```
+**Output:** đăng ký, đăng nhập, đăng xuất chạy được trên web.
+
+**Xong khi:** đăng ký user mới → vào trang chủ thấy tên; reload vẫn đăng nhập; đăng xuất → về `/login`; token hết
+hạn → tự về `/login`. Unit test cho validate form.
+
+## App
+
+### [ ] APP-A1 · Màn đăng nhập và đăng ký
+
+**Input:** BE-A1, BE-A2, APP-0.1.
+
+**Việc cần làm:** giống WEB-A1 — `features/auth/login_screen.dart`, `register_screen.dart`, `auth_controller.dart`
+(Riverpod). Token lưu bằng `flutter_secure_storage`. `go_router` redirect theo trạng thái đăng nhập.
+
+**Output:** đăng ký, đăng nhập, đăng xuất chạy được trên app.
+
+**Xong khi:** các kịch bản như WEB-A1 chạy được trên emulator Android và iOS simulator; widget test cho form.
 
 ---
 
-# Lát cắt A — Auth
+# Lát B — Hồ sơ và cân nặng
 
-## Task 4: Bảng `users` và đăng ký
+## BE
 
-**Files:**
-- Create: `db/migrations/0002_users_and_auth.sql`
-- Create: `apps/api/lib/src/service/auth_service.dart`, `apps/api/lib/src/repository/user_repository.dart`
-- Create: `apps/api/routes/v1/auth/register.dart`
-- Test: `apps/api/test/service/auth_service_test.dart`, `apps/api/test/repository/user_repository_test.dart`
+### [ ] BE-B1 · Sửa hồ sơ
 
-**Interfaces:**
-- Produces: `AuthService.register({required String email, required String password}) → Future<AuthTokens>`; `AuthTokens(accessToken, refreshToken, expiresIn)`.
+**Input:** BE-A2.
 
-**Owns:** `@BR-auth-002` | `@NFR-sec-001`
+**Rule:**
+- Sửa được `name`, `birth_date`, `gender`, `height_cm`, `daily_calorie_goals`. Không sửa `weight_g` ở đây
+  (cân nặng đi qua BE-B2).
+- `name` 1–100 ký tự; `height_cm` 50–250; `daily_calorie_goals` 800–6000; `birth_date` kiểu ngày (`YYYY-MM-DD`, cột `date`), không ở tương lai.
+- Chỉ trường có trong body mới được cập nhật (`model_dump(exclude_unset=True)`).
 
-- [ ] **Step 1: Viết test thất bại — email trùng bị từ chối, không phân biệt hoa thường**
+**Output:** `PATCH /me` → `User` sau khi sửa.
 
-```dart
-test('email đã có tài khoản đang tồn tại thì không tạo tài khoản thứ hai', () async {
-  await service.register(email: 'an@example.com', password: 'Str0ng!pass');
+**Xong khi:** test: sửa 1 trường giữ nguyên trường khác; giá trị ngoài khoảng → 422; gửi `weight_g` bị bỏ qua.
 
-  expect(
-    () => service.register(email: 'AN@Example.com', password: 'Other!pass1'),
-    throwsA(isA<AppException>().having((e) => e.code, 'code', 'EMAIL_TAKEN')),
-  );
-  expect(await repo.countByEmail('an@example.com'), 1);
-});
-```
+### [ ] BE-B2 · Lịch sử cân nặng
 
-- [ ] **Step 2: Chạy để xác nhận fail**
+**Input:** BE-0.1 (bảng `user_health_records`), BE-A2.
 
-Run: `melos run test:integration`
-Expected: FAIL — `AuthService` chưa tồn tại.
+**Rule:**
+- `weight_g` 20.000–400.000. `recorded_at` mặc định là hiện tại, không ở tương lai.
+- Thêm bản ghi → cập nhật `users.weight_g` bằng bản ghi có `recorded_at` mới nhất (trùng giờ thì lấy `id` lớn
+  hơn; DB cho phép hai lần cân cùng thời điểm), trong cùng transaction.
+  Xoá bản ghi → tính lại `users.weight_g` theo bản ghi mới nhất còn lại (không còn bản ghi nào → `NULL`).
+- Danh sách sắp `recorded_at` giảm dần; lọc `from`/`to` theo ngày.
 
-- [ ] **Step 3: Viết migration `0002_users_and_auth.sql`**
+**Output:** `GET/POST/DELETE /me/health-records`; `app/services/health_record_service.py`.
 
-Dùng nguyên DDL ở [03-database.md](./03-database.md) mục 4.1 và 4.2 (`users`, `refresh_tokens`,
-`password_reset_tokens`, `login_attempts`). Điểm mấu chốt cho task này:
+**Xong khi:** test: thêm 2 bản ghi khác ngày → `/me` trả cân nặng của bản mới nhất; xoá bản mới nhất →
+`/me` quay về bản trước; xoá bản ghi của user khác → 404.
 
-```sql
-CREATE UNIQUE INDEX users_email_active_uq ON users (email) WHERE deleted_at IS NULL;
-```
+## Web
 
-Index **có mệnh đề `WHERE`** chứ không phải `UNIQUE` thẳng — nếu thiếu, email của tài khoản đã xoá hẳn
-không dùng lại được, trái ví dụ ✅ của `BR-auth-008`.
+### [ ] WEB-B1 · Trang hồ sơ
 
-- [ ] **Step 4: Viết `AuthService.register` với băm mật khẩu**
+**Input:** BE-B1, WEB-A1. Wireframe S-12.
 
-```dart
-Future<AuthTokens> register({required String email, required String password}) async {
-  final hash = await _hasher.hash(password);          // argon2id, NFR-sec-001
-  try {
-    final user = await _users.insert(email: email, passwordHash: hash);
-    return _issueTokens(user.id);
-  } on PgException catch (e) {
-    if (e.code == '23505') {                          // unique_violation
-      throw AppException(code: 'EMAIL_TAKEN', httpStatus: 409, message: 'Email đã có tài khoản');
-    }
-    rethrow;
-  }
-}
-```
+**Việc cần làm:** `views/ProfileView.vue` — form sửa hồ sơ (cân nặng chỉ hiển thị, bấm sẽ sang trang cân nặng),
+nút Đăng xuất. Hiện thông báo khi lưu thành công.
 
-*Lý do bắt lỗi khoá duy nhất thay vì `SELECT` trước rồi `INSERT`:* kiểm tra trước rồi chèn có khoảng trống
-tranh chấp giữa hai request đồng thời; để database phán quyết là cách duy nhất không có khoảng trống đó.
+**Output:** sửa hồ sơ trên web.
 
-- [ ] **Step 5: Chạy test để xác nhận pass**
+**Xong khi:** sửa mục tiêu calo, reload vẫn thấy giá trị mới; nhập chiều cao 300 → báo lỗi trước khi gửi.
 
-Run: `melos run test:integration`
-Expected: PASS.
+### [ ] WEB-B2 · Trang cân nặng
 
-- [ ] **Step 6: Thêm test băm mật khẩu**
+**Input:** BE-B2, WEB-B1.
 
-```dart
-test('mật khẩu không được lưu dưới dạng khôi phục được', () async {
-  await service.register(email: 'b@example.com', password: 'Str0ng!pass');
-  final row = await repo.rawByEmail('b@example.com');
-  expect(row['password_hash'], isNot(contains('Str0ng!pass')));
-  expect(row['password_hash'], startsWith(r'$argon2id$'));
-});
-```
+**Việc cần làm:** `views/WeightView.vue` — form thêm cân nặng (nhập kg, gửi gram), danh sách các lần cân, nút xoá,
+biểu đồ đường theo thời gian (`chart.js` + `vue-chartjs`).
 
-- [ ] **Step 7: Commit**
+**Output:** quản lý lịch sử cân nặng trên web.
 
-```bash
-git add db/migrations/0002_users_and_auth.sql apps/api/
-git commit -m "feat(auth): register with unique active email and argon2id hashing"
-```
+**Xong khi:** nhập 65,5 kg → API nhận `65500`; biểu đồ cập nhật ngay; xoá một dòng → biểu đồ và hồ sơ cập nhật.
+
+## App
+
+### [ ] APP-B1 · Màn hồ sơ
+
+**Input:** BE-B1, APP-A1.
+
+**Việc cần làm / Output / Xong khi:** giống WEB-B1, ở `features/profile/profile_screen.dart`.
+
+### [ ] APP-B2 · Màn cân nặng
+
+**Input:** BE-B2, APP-B1.
+
+**Việc cần làm / Output / Xong khi:** giống WEB-B2, ở `features/profile/weight_screen.dart`; biểu đồ dùng `fl_chart`.
 
 ---
 
-## Task 5: Đăng nhập, JWT và xoay vòng refresh token
+# Lát C — Nguyên liệu
 
-**Files:**
-- Create: `apps/api/lib/src/security/jwt.dart`, `apps/api/lib/src/repository/refresh_token_repository.dart`
-- Create: `apps/api/routes/v1/auth/login.dart`, `apps/api/routes/v1/auth/refresh.dart`
-- Modify: `apps/api/lib/src/service/auth_service.dart`
-- Test: `apps/api/test/service/auth_refresh_test.dart`
+## BE
 
-**Interfaces:**
-- Consumes: `AuthTokens` (Task 4).
-- Produces: `AuthService.login(...)`, `AuthService.refresh(String refreshToken)`, `JwtVerifier.verify(String) → String userId`.
+### [ ] BE-C1 · Danh mục nguyên liệu dùng chung
 
-**Owns:** `@BR-auth-006`
+**Input:** BE-0.1, BE-A2; code hiện có `app/routers/product.py`.
 
-- [ ] **Step 1: Viết test thất bại — access token hết hạn nhưng refresh còn hạn thì thao tác vẫn thành công**
+**Việc cần làm:**
+- Danh mục nguyên liệu đã được migration `0002` (BE-0.1) nạp sẵn: 29 nguyên liệu, 32 định lượng. Muốn thêm hoặc
+  sửa nguyên liệu thì viết migration mới, không sửa `0002`.
+- `GET /products?q=` tìm theo tên, không phân biệt hoa thường (`ILIKE`), có phân trang.
+- `GET /products/{id}` trả kèm danh sách `nutritions`.
+- Người dùng chỉ đọc; không có API tạo/sửa nguyên liệu ở bản này.
 
-```dart
-test('access token hết hạn, refresh còn hạn thì gia hạn được và không mất nội dung', () async {
-  final tokens = await service.register(email: 'c@example.com', password: 'Str0ng!pass');
-  clock.advance(const Duration(minutes: 16));           // access sống 15 phút
+**Output:** `GET /products`, `GET /products/{id}`.
 
-  expect(() => verifier.verify(tokens.accessToken), throwsA(isA<TokenExpired>()));
+**Xong khi:** `GET /products?q=gà` trả các nguyên liệu có "gà" trong tên (không phân biệt hoa thường); phân trang
+đúng `total`; id không tồn tại → 404.
 
-  final renewed = await service.refresh(tokens.refreshToken);
-  expect(verifier.verify(renewed.accessToken), isNotEmpty);
-  expect(renewed.refreshToken, isNot(tokens.refreshToken));   // xoay vòng
-});
-```
+## Web
 
-- [ ] **Step 2: Chạy để xác nhận fail** — Run `melos run test:integration`, expected FAIL.
-- [ ] **Step 3: Viết `JwtVerifier` và `AuthService.login`/`refresh`** — refresh token lưu **băm**, mỗi lần dùng thì thu hồi bản cũ và phát bản mới trong cùng transaction.
-- [ ] **Step 4: Chạy test để xác nhận pass.**
-- [ ] **Step 5: Thêm test dùng lại refresh token đã xoay vòng bị từ chối** (phát hiện token bị đánh cắp).
-- [ ] **Step 6: Commit** — `git commit -m "feat(auth): jwt login with rotating refresh tokens"`
+### [ ] WEB-C1 · Ô chọn nguyên liệu
 
----
+**Input:** BE-C1, WEB-A1. Wireframe S-08.
 
-## Task 6: Giới hạn tần suất đăng nhập
+**Việc cần làm:** `components/ProductPicker.vue` — ô tìm kiếm (debounce 300 ms), chọn nguyên liệu, rồi chọn một
+định lượng (ví dụ "100 gram – 165 kcal – 12.000đ"). Emit `{product_nutrition_id, product_name, measure_unit, measurement}`.
+Component này chỉ dùng trong màn soạn công thức (WEB-D2), chưa cần trang riêng.
 
-**Files:**
-- Create: `apps/api/lib/src/middleware/rate_limit.dart`
-- Modify: `apps/api/routes/v1/auth/_middleware.dart`
-- Test: `apps/api/test/middleware/rate_limit_test.dart`
+**Output:** component dùng lại được.
 
-**Interfaces:**
-- Consumes: bảng `login_attempts` (Task 4).
-- Produces: `rateLimitLogin()` middleware.
+**Xong khi:** gõ "ga" → hiện danh sách sau 300 ms; chọn xong emit đúng dữ liệu (unit test với API giả).
 
-**Owns:** `@BR-auth-005` | `@NFR-sec-002`
+## App
 
-- [ ] **Step 1: Viết test thất bại — lần thứ 6 bị từ chối dù mật khẩu đúng**
+### [ ] APP-C1 · Ô chọn nguyên liệu
 
-```dart
-test('5 lần sai trong 15 phút thì lần thứ 6 bị từ chối kể cả khi mật khẩu đúng', () async {
-  for (var i = 0; i < 5; i++) {
-    await expectLater(service.login(email: 'd@example.com', password: 'sai'), throwsA(anything));
-  }
-  expect(
-    () => service.login(email: 'd@example.com', password: 'Str0ng!pass'),   // đúng
-    throwsA(isA<AppException>().having((e) => e.code, 'code', 'RATE_LIMITED')),
-  );
-});
+**Input:** BE-C1, APP-A1.
 
-test('sai 2 lần rồi đúng thì đăng nhập được bình thường', () async {
-  for (var i = 0; i < 2; i++) {
-    await expectLater(service.login(email: 'e@example.com', password: 'sai'), throwsA(anything));
-  }
-  expect((await service.login(email: 'e@example.com', password: 'Str0ng!pass')).accessToken, isNotEmpty);
-});
-```
-
-Test thứ hai không thừa: nó chốt rằng bộ đếm tính **liên tiếp trong cửa sổ**, không phải cộng dồn vĩnh viễn.
-
-- [ ] **Step 2: Chạy để xác nhận fail** — expected FAIL.
-- [ ] **Step 3: Viết `rateLimitLogin()`** đếm `login_attempts` 15 phút gần nhất theo email, và song song theo IP.
-- [ ] **Step 4: Chạy test để xác nhận pass.**
-- [ ] **Step 5: Commit** — `git commit -m "feat(auth): rate limit login attempts per email and ip"`
+**Việc cần làm / Output / Xong khi:** giống WEB-C1, dạng bottom sheet `features/recipes/product_picker_sheet.dart`.
 
 ---
 
-> **Hết phần khuôn mẫu.** Từ Task 7 trở đi là task card. Mỗi card đủ để chạy `/to-plan` bung ra step có code.
+# Lát D — Công thức
+
+## BE
+
+### [ ] BE-D1 · CRUD công thức
+
+**Input:** BE-0.1 (cột `recipes.user_id`), BE-C1.
+
+**Rule:**
+- Công thức thuộc user tạo ra; user khác đọc/sửa/xoá → 404.
+- `name` 1–200 ký tự, bắt buộc. `detail_recipe` tuỳ chọn, tối đa 10.000 ký tự.
+- `items` có ít nhất 1 dòng. Mỗi `product_nutrition_id` chỉ xuất hiện 1 lần (trùng → 400). `quantity > 0`.
+  `product_nutrition_id` không tồn tại → 400.
+- Tạo / sửa = ghi `recipes` + thay toàn bộ `recipe_items` trong một transaction.
+- Xoá công thức đang có trong `meal_items` → 409 "Công thức đang được dùng trong nhật ký bữa ăn".
+- Danh sách tìm theo tên (`?q=`), sắp theo `updated_at` giảm dần. `updated_at` do trigger DB tự gán khi UPDATE
+  `recipes`; code chỉ cần UPDATE dòng `recipes` (kể cả khi chỉ đổi nguyên liệu) để thời điểm sửa được ghi lại.
+
+**Output:** `app/routers/recipes.py`, `app/services/recipe_service.py`, các endpoint `/recipes` theo mục 4.
+
+**Xong khi:** test cho từng rule trên, trong đó có: sửa công thức có lỗi ở dòng nguyên liệu thứ 2 → công thức giữ
+nguyên như trước khi sửa.
+
+### [ ] BE-D2 · Tính calo và giá cho công thức
+
+**Input:** BE-D1.
+
+**Việc cần làm:** một hàm SQL hoặc Python duy nhất tính `calories`, `price` mỗi dòng và `total_calories`,
+`total_price` theo công thức ở mục 3. Dùng cho cả `RecipeSummary` (danh sách) và `RecipeDetail`. Danh sách phải
+tính bằng một câu SQL có `GROUP BY`, không gọi lặp từng công thức.
+
+**Output:** các trường `total_calories`, `total_price`, `items[].calories`, `items[].price` có giá trị đúng.
+
+**Xong khi:** test với ví dụ ở mục 3 (250 g ức gà → 412,5 kcal, 30.000đ); công thức 2 nguyên liệu cộng đúng;
+nguyên liệu có `price` NULL → giá dòng đó là NULL, tổng giá chỉ cộng các dòng có giá.
+
+## Web
+
+### [ ] WEB-D1 · Danh sách và chi tiết công thức
+
+**Input:** BE-D1, BE-D2, WEB-A1. Wireframe S-05, S-06.
+
+**Việc cần làm:** `views/RecipeListView.vue` (ô tìm, thẻ công thức hiện tổng calo và giá, phân trang),
+`views/RecipeDetailView.vue` (bảng nguyên liệu, cách làm, nút Sửa / Xoá; xoá gặp 409 thì hiện thông điệp).
+
+**Output:** xem và xoá công thức trên web.
+
+**Xong khi:** tìm "gà" lọc đúng; xoá công thức chưa dùng → biến mất khỏi danh sách; xoá công thức đã dùng → báo lỗi,
+không mất.
+
+### [ ] WEB-D2 · Soạn và sửa công thức
+
+**Input:** WEB-C1, WEB-D1. Wireframe S-07.
+
+**Việc cần làm:** `views/RecipeEditorView.vue` dùng cho cả tạo và sửa — tên, cách làm, danh sách nguyên liệu (thêm
+bằng `ProductPicker`, nhập số lượng, xoá dòng). Tổng calo và giá **ước tính** ngay trên form; sau khi lưu hiện số
+từ BE. Rời trang khi chưa lưu → hỏi xác nhận (dùng modal của trang, không dùng `window.confirm`).
+
+**Output:** tạo và sửa công thức trên web.
+
+**Xong khi:** tạo công thức 3 nguyên liệu → trang chi tiết hiện đúng tổng; sửa bớt 1 nguyên liệu → tổng giảm đúng;
+chọn trùng nguyên liệu → form chặn trước khi gửi.
+
+## App
+
+### [ ] APP-D1 · Danh sách và chi tiết công thức
+
+**Input:** BE-D1, BE-D2, APP-A1.
+
+**Việc cần làm / Output / Xong khi:** giống WEB-D1, ở `features/recipes/recipe_list_screen.dart`,
+`recipe_detail_screen.dart`; danh sách cuộn vô hạn thay cho phân trang.
+
+### [ ] APP-D2 · Soạn và sửa công thức
+
+**Input:** APP-C1, APP-D1.
+
+**Việc cần làm / Output / Xong khi:** giống WEB-D2, ở `features/recipes/recipe_editor_screen.dart`; rời màn khi chưa
+lưu → `PopScope` hỏi xác nhận.
 
 ---
 
-## Task 7: Quên và đặt lại mật khẩu
-**Files:** `apps/api/lib/src/service/auth_service.dart`, `apps/api/lib/src/mail/`, `routes/v1/auth/forgot-password.dart`, `reset-password.dart`
-**Owns:** `@BR-auth-003`
-**Trọng tâm test:** token dùng một lần (lần hai bị từ chối); hết hạn sau 60 phút; `forgot-password` luôn trả 204 dù email có hay không.
-**Xong khi:** đặt lại được mật khẩu và truy cập lại toàn bộ dữ liệu cũ; hai ví dụ ❌ của `BR-auth-003` đều có test.
+# Lát E — Bữa ăn và tổng calo
 
-## Task 8: Đổi mật khẩu và thu hồi phiên khác
-**Files:** `auth_service.dart`, `refresh_token_repository.dart`, `routes/v1/auth/change-password.dart`
-**Owns:** `@BR-auth-004`
-**Trọng tâm test:** phiên hiện tại còn sống, mọi phiên khác chết ngay.
+## BE
 
-## Task 9: Từ chối khi cả hai token hết hạn
-**Files:** `apps/api/lib/src/middleware/auth.dart`
-**Owns:** `@BR-auth-007`
-**Trọng tâm test:** không bản ghi nào được ghi khi thao tác bị từ chối (kiểm tra bằng đếm dòng trước/sau).
+### [ ] BE-E1 · Nhật ký bữa ăn
 
-## Task 10: Xoá tài khoản và dọn sau 30 ngày
-**Files:** `auth_service.dart`, `apps/api/tool/purge_accounts.dart`, `routes/v1/auth/account.dart`
-**Owns:** `@BR-auth-008`
-**Trọng tâm test:** đăng nhập lại sau 10 ngày khôi phục được; sau 40 ngày thì không, và email dùng đăng ký lại được.
+**Input:** BE-0.1 (cột `meal_items.portion`), BE-D2.
 
-## Task 11: Phạm vi sở hữu dữ liệu
-**Files:** `apps/api/lib/src/middleware/auth.dart`, mọi repository
-**Owns:** `@BR-auth-001` | `@NFR-compliance-001`
-**Trọng tâm test:** tài khoản B yêu cầu tài nguyên của A nhận `404`, **không phải** `403` — `403` là tiết lộ sự tồn tại.
-**Xong khi:** có một test dùng chung quét mọi route `/v1/**` cần xác thực, không phải test rời từng route.
+**Rule:**
+- `meal_type` ∈ breakfast / lunch / dinner / snack, bắt buộc. `eaten_at` bắt buộc, không quá hiện tại + 7 ngày.
+- `items` ít nhất 1 dòng; `recipe_id` phải là công thức của chính user (không phải → 400); `portion` 0,1–10.
+- Tạo / sửa ghi `meals` + thay toàn bộ `meal_items` trong một transaction.
+- `GET /meals?date=` trả các bữa của ngày đó, sắp theo `eaten_at`, mỗi món có `calories = calo công thức × portion`.
+- Calo luôn tính theo công thức **hiện tại**: sửa công thức thì nhật ký các ngày cũ cũng đổi theo. Đây là giới hạn có
+  chủ ý của bản này, ghi lại để không ai coi là bug.
 
-## Task 12: Middleware idempotency
-**Files:** `db/migrations/0006_idempotency.sql`, `apps/api/lib/src/middleware/idempotency.dart`
-**Owns:** `@ADR-009` | `@NFR-sec-003`
-**Trọng tâm test:** cùng khoá cùng nội dung phát lại response cũ; cùng khoá khác nội dung trả `422`.
+**Output:** `app/routers/meals.py`, `app/services/meal_service.py`.
 
-## Task 13: [UI] Khung ứng dụng responsive và điều hướng
-**Screen:** khung chung cho S-01…S-12
-**Files:** `apps/app/lib/src/core/layout/breakpoints.dart`, `core/theme/`, `routing/app_router.dart`, `core/shell/adaptive_scaffold.dart`
-**Owns:** `@NFR-platform-001`, `@NFR-platform-002`
-**Trọng tâm test:** widget test render khung ở cả ba dải và khẳng định đúng kiểu điều hướng (thanh dưới / rail / sidebar).
-**Xong khi:** `flutter build web`, `flutter build apk --debug` và `flutter build ios --simulator` đều chạy được.
+**Xong khi:** test: tạo bữa trưa 2 món, 1 món ăn nửa phần → tổng đúng; dùng công thức của user khác → 400; xoá bữa →
+các `meal_items` cũng mất; lấy theo ngày không lẫn bữa của ngày bên cạnh (23:59 và 00:00).
 
-## Task 14: [UI] S-01 Đăng nhập và đăng ký
-**Screen:** S-01 ([04-mock-ui.md](./04-mock-ui.md))
-**Files:** `apps/app/lib/src/features/auth/`
-**Owns:** — (không sở hữu BR; hành vi thuộc Task 4–6)
-**Trọng tâm test:** email trùng báo ngay dưới ô và **không** xoá nội dung đã nhập; trạng thái bị tạm khoá hiện thời gian còn lại.
+### [ ] BE-E2 · Tổng calo theo ngày
 
-## Task 15: [UI] S-02 Quên và đặt lại mật khẩu
-**Screen:** S-02
-**Files:** `apps/app/lib/src/features/auth/`
-**Owns:** —
-**Trọng tâm test:** câu xác nhận không tiết lộ email có tồn tại hay không.
+**Input:** BE-E1, BE-B1.
 
----
+**Rule:** `total_calories` = tổng calo các món trong ngày; `remaining_calories = goal - total` (có thể âm);
+chưa đặt mục tiêu → `goal_calories` và `remaining_calories` là `null`. `by_meal_type` luôn đủ 4 khoá, bữa không ăn = 0.
 
-# Lát cắt B — Danh mục nguyên liệu
+**Output:** `GET /me/daily-summary?date=`.
 
-## Task 16: Bảng `units` và dữ liệu đơn vị
-**Files:** `db/migrations/0003_units_and_ingredients.sql`, `packages/shared/lib/src/unit/unit.dart`
-**Owns:** `@BR-ingredient-005`
-**Trọng tâm test:** 0,5 kg thành 500 g, 1 l thành 1.000 ml; ràng buộc `units_factor_rule` từ chối đơn vị đếm mang hệ số toàn hệ thống.
+**Xong khi:** test: ngày không có bữa nào → tổng 0, đủ 4 khoá; ăn quá mục tiêu → `remaining_calories` âm.
 
-## Task 17: Danh mục nguyên liệu hai tầng
-**Files:** `0003_units_and_ingredients.sql`, `apps/api/lib/src/repository/ingredient_repository.dart`, `service/ingredient_service.dart`
-**Interfaces:** Produces `IngredientRepository.visibleTo(userId)` — mọi truy vấn nguyên liệu đi qua đây.
-**Owns:** `@BR-ingredient-001`, `@BR-ingredient-002`, `@BR-ingredient-003` | `@ADR-003`
-**Trọng tâm test:** tài khoản khác không dùng được nguyên liệu riêng; calo 5.000 và calo âm đều bị từ chối; ràng buộc `ing_nutrition_all_or_none` chặn trạng thái nửa vời.
+## Web
 
-## Task 18: Hệ số quy đổi riêng theo nguyên liệu
-**Files:** `ingredient_unit_factors` trong `0003`, `packages/shared/lib/src/unit/conversion.dart`
-**Interfaces:** Produces `Conversion.toBase({ingredient, quantity, unit}) → double?` — trả `null` nghĩa là không quy đổi được; đây là kiểu trả về mà cả dinh dưỡng lẫn pantry đều dựa vào.
-**Owns:** `@BR-ingredient-004`
-**Trọng tâm test:** 2 quả trứng thành 110 g khi có hệ số; 3 nhánh hành trả `null` khi chưa khai; hệ số của nguyên liệu này **không** áp dụng cho nguyên liệu kia.
+### [ ] WEB-E1 · Nhật ký bữa ăn theo ngày
 
-## Task 19: Endpoint tìm nguyên liệu
-**Files:** `routes/v1/ingredients/index.dart`
-**Owns:** —
-**Trọng tâm test:** tìm "thit bo" ra "Thịt bò nạc"; kết quả gồm nguyên liệu hệ thống và nguyên liệu riêng của chính người dùng, không của người khác.
+**Input:** BE-E1, WEB-D1. Wireframe S-04, S-10.
 
-## Task 20: [UI] S-08 Chọn nguyên liệu
-**Screen:** S-08
-**Files:** `apps/app/lib/src/features/ingredient/`
-**Owns:** —
-**Trọng tâm test:** ghi chú `ⓘ` về việc bỏ trống dữ liệu dinh dưỡng luôn hiển thị; calo > 900 báo lỗi ngay tại ô.
+**Việc cần làm:** `views/MealDiaryView.vue` — chọn ngày (nút ngày trước / sau / hôm nay), 4 nhóm bữa, mỗi bữa liệt kê
+món và calo. Nút "Thêm món" mở dialog chọn công thức + phần ăn + giờ ăn. Sửa / xoá bữa.
+
+**Output:** ghi nhật ký bữa ăn trên web.
+
+**Xong khi:** thêm bữa sáng 1 món → hiện đúng nhóm, đúng calo; chuyển sang ngày hôm sau không thấy bữa đó.
+
+### [ ] WEB-E2 · Trang "Hôm nay"
+
+**Input:** BE-E2, WEB-E1. Wireframe S-03 (rút gọn).
+
+**Việc cần làm:** `views/TodayView.vue` là trang chủ — vòng tiến độ calo đã ăn / mục tiêu, số còn lại, calo theo
+từng bữa, lối tắt "Thêm bữa ăn". Chưa đặt mục tiêu → hiện lời nhắc sang trang Hồ sơ.
+
+**Output:** trang chủ web.
+
+**Xong khi:** thêm một bữa ở WEB-E1 rồi quay lại trang chủ → số liệu cập nhật; ăn quá mục tiêu → hiện "Vượt X kcal".
+
+## App
+
+### [ ] APP-E1 · Nhật ký bữa ăn theo ngày
+
+**Input:** BE-E1, APP-D1.
+
+**Việc cần làm / Output / Xong khi:** giống WEB-E1, ở `features/meals/meal_diary_screen.dart`; vuốt ngang để đổi ngày.
+
+### [ ] APP-E2 · Màn "Hôm nay"
+
+**Input:** BE-E2, APP-E1.
+
+**Việc cần làm / Output / Xong khi:** giống WEB-E2, ở `features/today/today_screen.dart`, là tab đầu tiên.
 
 ---
 
-# Lát cắt C — Công thức
+# Phase cuối — Đóng gói
 
-## Task 21: Bảng `recipes` và trạng thái nháp
-**Files:** `db/migrations/0004_recipes.sql`, `apps/api/lib/src/service/recipe_service.dart`, `repository/recipe_repository.dart`
-**Interfaces:** Produces `RecipeService.saveDraft(...)`, `Recipe` model trong `shared`.
-**Owns:** `@BR-recipe-001`, `@BR-recipe-005`
-**Trọng tâm test:** nháp chỉ có tên vẫn lưu được; nháp không ra ở tìm kiếm và không gắn được vào lịch; tên chỉ khoảng trắng và tên 121 ký tự đều bị từ chối.
+### [ ] OPS-1 · Chạy toàn bộ bằng Docker Compose
 
-## Task 22: Dòng nguyên liệu của công thức
-**Files:** `0004_recipes.sql`, `recipe_service.dart`
-**Owns:** `@BR-recipe-006`, `@BR-recipe-007`, `@BR-recipe-009`
-**Trọng tâm test:** chuỗi tự do không khớp danh mục bị từ chối; dòng tuỳ khẩu vị kèm số lượng bị từ chối; trùng nguyên liệu **cùng** đơn vị bị chặn nhưng **khác** đơn vị thì hợp lệ.
+**Input:** tất cả task BE và WEB.
 
-## Task 23: Bước nấu
-**Files:** `0004_recipes.sql`, `recipe_service.dart`
-**Owns:** `@BR-recipe-010`
-**Trọng tâm test:** xoá bước giữa thì các bước còn lại được đánh số lại liên tiếp từ 1.
+**Việc cần làm:** `docker-compose.yml` ở gốc gồm `db` (postgres:16), `api` (chạy `alembic upgrade head` rồi
+`fastapi run`; không chạy `seed_dev.py`), `web` (build Vite, phục vụ bằng nginx). README gốc hướng dẫn chạy và trỏ
+app Flutter tới API.
 
-## Task 24: Tag
-**Files:** `0004_recipes.sql`, `packages/shared/lib/src/validation/tag.dart`
-**Owns:** `@BR-recipe-013`, `@BR-recipe-014`
-**Trọng tâm test:** "ăn chay", "Ăn Chay", " ăn  chay " gộp thành một; tag thứ 21 bị từ chối và 20 tag cũ giữ nguyên.
+**Output:** `docker compose up` dựng được cả hệ thống từ máy sạch.
 
-## Task 25: Validate khi công bố
-**Files:** `recipe_service.dart`, `routes/v1/recipes/[id]/publish.dart`
-**Owns:** `@BR-recipe-002`, `@BR-recipe-003`, `@BR-recipe-004`, `@BR-recipe-008`
-**Trọng tâm test:** mỗi trường hợp thiếu nói rõ **thiếu cái gì**; công thức toàn dòng tuỳ khẩu vị bị từ chối.
-
-## Task 26: Trùng tên hợp lệ và nhân bản
-**Files:** `recipe_service.dart`, `routes/v1/recipes/[id]/duplicate.dart`
-**Owns:** `@BR-recipe-015`, `@BR-recipe-016`
-**Trọng tâm test:** sửa bản sao không đụng bản gốc.
-
-## Task 27: Kiểm soát ghi đè lạc quan
-**Files:** `recipe_repository.dart`, `routes/v1/recipes/[id]/index.dart`
-**Owns:** `@BR-recipe-017` | `@ADR-008`, `@NFR-data-001`
-**Trọng tâm test:** ghi dựa trên phiên bản cũ trả `409` và **không trường nào** đổi (so sánh toàn bộ dòng trước/sau).
-
-## Task 28: Tạo công thức idempotent
-**Files:** `routes/v1/recipes/index.dart`
-**Owns:** `@BR-recipe-018`
-**Trọng tâm test:** cùng khoá gửi lại ra một công thức; khoá khác cùng tên ra hai công thức.
-
-## Task 29: Ảnh công thức qua URL ký
-**Files:** `apps/api/lib/src/service/image_service.dart`, `storage/s3_client.dart`, `routes/v1/recipes/[id]/image-upload-url.dart`
-**Owns:** `@BR-recipe-011`, `@BR-recipe-012` | `@ADR-006`, `@NFR-data-002`
-**Trọng tâm test:** ảnh 25 MB bị từ chối và ảnh cũ giữ nguyên; tài khoản khác không xin được URL đọc; vượt hạn mức trả `413`.
-**Phụ thuộc:** TQ-01 (chọn nhà cung cấp object storage).
-
-## Task 30: Xoá mềm công thức
-**Files:** `recipe_repository.dart`, `routes/v1/recipes/[id]/index.dart`
-**Owns:** `@BR-recipe-019` | `@ADR-007`
-**Trọng tâm test:** công thức đã xoá biến khỏi tìm kiếm và không gắn mới vào lịch được.
-
-## Task 31: [UI] Adapter chọn ảnh đa nền tảng
-**Screen:** dùng chung cho S-07
-**Files:** `apps/app/lib/src/core/media/image_source.dart` + hai hiện thực mobile/web
-**Owns:** `@NFR-platform-003`
-**Trọng tâm test:** chạy thật trên Chrome (bytes, không đường dẫn) và trên iOS với ảnh HEIC.
-
-## Task 32: [UI] S-07 Soạn công thức
-**Screen:** S-07
-**Files:** `apps/app/lib/src/features/recipe/editor/`
-**Owns:** —
-**Trọng tâm test:** tự lưu nháp sau 3 giây ngừng gõ và trước khi rời màn hình; xung đột phiên bản **không** làm mất nội dung đang soạn; kéo thả sắp xếp bước đánh số lại tự động.
-
-## Task 33: [UI] S-06 Chi tiết công thức
-**Screen:** S-06
-**Files:** `apps/app/lib/src/features/recipe/detail/`
-**Owns:** —
-**Trọng tâm test:** đổi số khẩu phần làm cả định lượng lẫn dinh dưỡng đổi theo tỉ lệ.
+**Xong khi:** trên máy chưa cài gì ngoài Docker: `docker compose up` → mở web, đăng ký, tạo công thức, ghi bữa ăn,
+thấy tổng calo.
 
 ---
 
-# Lát cắt D — Tìm kiếm
+## Bảng theo dõi nhanh
 
-## Task 34: `search_text` và index trigram
-**Files:** `0004_recipes.sql`, `recipe_service.dart` (cập nhật `search_text` trong cùng transaction)
-**Owns:** `@BR-search-002`, `@BR-search-003` | `@ADR-005`
-**Trọng tâm test:** "pho bo" ra "Phở bò"; "THỊT" ra công thức có nguyên liệu thịt; từ khoá chỉ có trong bước nấu **không** ra kết quả. Test hiệu năng: `EXPLAIN` xác nhận dùng index trigram, không seq scan.
+| Lát | BE | Web | App |
+|-----|----|-----|-----|
+| 0 Nền móng | BE-0.1, BE-0.2 | WEB-0.1 | APP-0.1 |
+| A Tài khoản | BE-A1, BE-A2 | WEB-A1 | APP-A1 |
+| B Hồ sơ, cân nặng | BE-B1, BE-B2 | WEB-B1, WEB-B2 | APP-B1, APP-B2 |
+| C Nguyên liệu | BE-C1 | WEB-C1 | APP-C1 |
+| D Công thức | BE-D1, BE-D2 | WEB-D1, WEB-D2 | APP-D1, APP-D2 |
+| E Bữa ăn, tổng calo | BE-E1, BE-E2 | WEB-E1, WEB-E2 | APP-E1, APP-E2 |
+| Đóng gói | OPS-1 | | |
 
-## Task 35: Phạm vi và từ khoá rỗng
-**Files:** `recipe_repository.dart`, `routes/v1/recipes/index.dart`
-**Owns:** `@BR-search-001`, `@BR-search-004`
-**Trọng tâm test:** nháp không ra kết quả; công thức tài khoản khác không ra kết quả; từ khoá rỗng ra toàn bộ.
-
-## Task 36: Bộ lọc
-**Files:** `recipe_repository.dart`
-**Owns:** `@BR-search-005`, `@BR-search-006`
-**Trọng tâm test:** hai **loại** lọc khác nhau giao nhau; nhiều **giá trị** trong cùng một loại hợp nhau. Đây là hai luật ngược nhau nên cần test cho từng luật, không gộp.
-
-## Task 37: Phân trang con trỏ
-**Files:** `recipe_repository.dart`
-**Owns:** `@BR-search-007` | `@NFR-perf-002`
-**Trọng tâm test:** 320 công thức lấy hết bằng con trỏ, không trùng không sót, kể cả khi có công thức mới được chèn giữa hai lần lấy.
-
-## Task 38: [UI] S-05 Danh sách công thức
-**Screen:** S-05
-**Files:** `apps/app/lib/src/features/recipe/list/`
-**Owns:** —
-**Trọng tâm test:** cuộn tải tiếp; ba trạng thái skeleton/rỗng/lỗi đều render được.
-
----
-
-# Lát cắt E — Dinh dưỡng
-
-## Task 39: Tính dinh dưỡng công thức
-**Files:** `apps/api/lib/src/service/nutrition_service.dart`, `recipe_nutrition` trong `0004`
-**Interfaces:** Consumes `Conversion.toBase` (Task 18). Produces `NutritionService.computeForRecipe(recipeId) → RecipeNutrition`.
-**Owns:** `@BR-nutrition-001`, `@BR-nutrition-002`
-**Trọng tâm test:** 400 g thịt bò 250 kcal/100 g + 200 g bún 110 kcal/100 g, 4 khẩu phần → tổng 1.220 kcal, mỗi khẩu phần 305 kcal.
-
-## Task 40: Cờ ước tính chưa đầy đủ
-**Files:** `nutrition_service.dart`
-**Owns:** `@BR-nutrition-003`, `@BR-nutrition-004`
-**Trọng tâm test:** thiếu hệ số quy đổi và thiếu dữ liệu dinh dưỡng là **hai đường** khác nhau cùng dẫn tới cờ; cả hai đều trả về **tên nguyên liệu** gây ra; công thức vẫn công bố được.
-
-## Task 41: Scale theo khẩu phần
-**Files:** `nutrition_service.dart`, `routes/v1/recipes/[id]/index.dart`
-**Owns:** `@BR-nutrition-005`
-**Trọng tâm test:** công thức cơ sở 4 khẩu phần xem ở 6 khẩu phần thì 800 g thịt thành 1.200 g.
-
-## Task 42: Luật làm tròn
-**Files:** `packages/shared/lib/src/nutrition/rounding.dart`
-**Owns:** `@BR-nutrition-009`
-**Trọng tâm test:** ba mục 333,4 kcal ra tổng 1.000 kcal, **không** phải 999 — test này là lý do tồn tại của cả task.
-
-## Task 43: Tuyên bố miễn trừ
-**Files:** `apps/app/lib/src/features/profile/`, `features/meal_plan/day/`
-**Owns:** `@BR-nutrition-011`
-**Trọng tâm test:** tuyên bố hiển thị ở nơi người dùng đọc số liệu, không giấu trong trang điều khoản.
-
----
-
-# Lát cắt F — Kế hoạch bữa ăn
-
-## Task 44: `meal_plan_entries` và tạo mục lịch
-**Files:** `db/migrations/0005_meal_plan_and_pantry.sql`, `apps/api/lib/src/service/meal_plan_service.dart`
-**Interfaces:** Consumes `NutritionService.computeForRecipe` (Task 39). Produces `MealPlanService.addEntry(...)` ghi kèm snapshot bốn chỉ số.
-**Owns:** `@BR-mealplan-001`, `@BR-mealplan-002`, `@BR-mealplan-003`, `@BR-mealplan-004` | `@ADR-004`
-**Trọng tâm test:** đổi múi giờ thiết bị không làm mục lịch nhảy ngày; khẩu phần 0 và 51 bị từ chối; khẩu phần 0,5 hợp lệ nhưng 0,3 thì không; không khai khẩu phần thì lấy theo công thức.
-
-## Task 45: Nhiều mục trong một bữa
-**Files:** `meal_plan_service.dart`
-**Owns:** `@BR-mealplan-005`
-**Trọng tâm test:** gắn cùng một công thức hai lần vào một bữa ra **hai mục riêng**, không gộp và không chặn.
-
-## Task 46: Giới hạn khoảng ngày
-**Files:** `meal_plan_service.dart`
-**Owns:** `@BR-mealplan-006`, `@BR-mealplan-007`
-**Trọng tâm test:** biên đúng 30 ngày và đúng 365 ngày (không phải 29/31 và 364/366).
-
-## Task 47: Tuần và endpoint đọc kế hoạch
-**Files:** `routes/v1/meal-plan/index.dart`, `packages/shared/lib/src/date/week.dart`
-**Owns:** `@BR-mealplan-010`
-**Trọng tâm test:** tuần chứa ngày 25/09/2026 luôn ra Thứ Hai 21/09 đến Chủ Nhật 27/09.
-
-## Task 48: Tổng dinh dưỡng theo ngày
-**Files:** `meal_plan_service.dart`, `repository/meal_plan_repository.dart`
-**Owns:** `@BR-nutrition-006`, `@BR-nutrition-007`, `@BR-nutrition-008`
-**Trọng tâm test:** ngày trống ra 0 và được coi là đầy đủ; một món ước tính chưa đầy đủ làm cả ngày mang cờ.
-
-## Task 49: Mục tiêu calo mỗi ngày
-**Files:** `routes/v1/me/index.dart`, `apps/app/lib/src/features/profile/`
-**Owns:** `@BR-auth-010`, `@BR-nutrition-010`
-**Trọng tâm test:** mục tiêu 0 và số âm bị từ chối; ngày 2.300 kcal với mục tiêu 2.000 được đánh dấu vượt.
-
-## Task 50: Lan truyền khi sửa hoặc xoá công thức
-**Files:** `recipe_service.dart`, `meal_plan_service.dart`
-**Owns:** `@BR-recipe-020`, `@BR-recipe-021`, `@BR-recipe-022`
-**Trọng tâm test:** đây là task rủi ro nhất của dự án — cần test cho cả ba mốc thời gian:
-- sửa công thức → mục **hôm qua** không đổi, mục **hôm nay** đổi, mục **ngày mai** đổi;
-- xoá công thức → mục hôm qua giữ tên và số liệu, mục ngày mai biến mất và tổng ngày mai giảm đúng phần đó.
-
-## Task 51: Gỡ mục lịch
-**Files:** `meal_plan_service.dart`
-**Owns:** `@BR-mealplan-009`
-**Trọng tâm test:** gỡ mục không đụng công thức trong kho.
-
-## Task 52: Sao chép tuần
-**Files:** `meal_plan_service.dart`, `routes/v1/meal-plan/copy-week.dart`
-**Owns:** `@BR-mealplan-008`
-**Trọng tâm test:** mục sẵn có ở tuần đích được giữ và bản sao thêm vào bên cạnh — **không ghi đè**.
-
-## Task 53: [UI] S-03 Kế hoạch tuần
-**Screen:** S-03
-**Files:** `apps/app/lib/src/features/meal_plan/week/`
-**Owns:** —
-**Trọng tâm test:** lưới 7×4 ở Expanded, danh sách cuộn dọc ở Compact; dấu `▲` vượt mục tiêu và `⚠` ước tính chưa đầy đủ hiện đúng ngày.
-
-## Task 54: [UI] S-04 Chi tiết một ngày
-**Screen:** S-04
-**Files:** `apps/app/lib/src/features/meal_plan/day/`
-**Owns:** —
-**Trọng tâm test:** cờ `⚠` luôn kèm **tên nguyên liệu** gây ra nó.
-
-## Task 55: [UI] S-10 Thêm món vào lịch
-**Screen:** S-10
-**Files:** `apps/app/lib/src/features/meal_plan/add/`
-**Owns:** —
-**Trọng tâm test:** lịch chặn chọn ngày ngoài khoảng −30/+365; xem trước tác động lên tổng ngày.
-
-## Task 56: [UI] S-11 Sao chép tuần
-**Screen:** S-11
-**Files:** `apps/app/lib/src/features/meal_plan/copy/`
-**Owns:** —
-**Trọng tâm test:** câu giải thích nêu đúng số món của cả hai tuần và nói rõ là cộng thêm.
-
----
-
-# Lát cắt G — Pantry
-
-## Task 57: `pantry_items`, gộp và tách lô
-**Files:** `0005_meal_plan_and_pantry.sql`, `apps/api/lib/src/service/pantry_service.dart`
-**Owns:** `@BR-pantry-001`, `@BR-pantry-002`, `@BR-pantry-003`
-**Trọng tâm test:** trùng cả ba thì cộng dồn; khác hạn dùng thì tách lô; **hai lô cùng không khai hạn cũng phải gộp** — đây là chỗ `NULLS NOT DISTINCT` chứng minh nó cần thiết, thiếu nó là sinh hai dòng.
-
-## Task 58: Luật khả dụng
-**Files:** `pantry_service.dart`
-**Owns:** `@BR-pantry-004`, `@BR-pantry-005`, `@BR-pantry-006`
-**Trọng tâm test:** hạn đúng hôm nay **vẫn còn hạn**, hạn hôm qua thì không; số lượng 0 không tính; không khai hạn thì luôn tính.
-
-## Task 59: Đối chiếu công thức với pantry
-**Files:** `pantry_service.dart`, `routes/v1/recipes/[id]/pantry-check.dart`
-**Interfaces:** Consumes `Conversion.toBase` (Task 18). Produces `PantryCheck` với ba kết luận `enough | short(shortfall) | unknown`.
-**Owns:** `@BR-pantry-007`, `@BR-pantry-008`, `@BR-pantry-009`, `@BR-pantry-010`
-**Trọng tâm test:** ba kết luận đều có test riêng; tính theo khẩu phần đang xem chứ không phải khẩu phần cơ sở; dòng tuỳ khẩu vị bị bỏ qua; một dòng `unknown` làm cả công thức không được kết luận là đủ; lên lịch không làm đổi tồn.
-
-## Task 60: Bộ lọc "nấu được với đồ đang có"
-**Files:** `recipe_repository.dart`, `routes/v1/recipes/index.dart`
-**Owns:** `@BR-search-008`
-**Trọng tâm test:** công thức có dòng `unknown` **không** nằm trong kết quả; `EXPLAIN` xác nhận không sinh truy vấn N+1.
-
-## Task 61: [UI] S-09 Tủ đồ
-**Screen:** S-09
-**Files:** `apps/app/lib/src/features/pantry/`
-**Owns:** —
-**Trọng tâm test:** lô quá hạn và lô số lượng 0 hiển thị kèm dòng chữ "không tính khi đối chiếu".
-
-## Task 62: [UI] S-12 Hồ sơ và cài đặt
-**Screen:** S-12
-**Files:** `apps/app/lib/src/features/profile/`
-**Owns:** —
-**Trọng tâm test:** hộp thoại xoá tài khoản nêu **số lượng dữ liệu cụ thể** và mốc 30 ngày.
-
----
-
-# Lát cắt H — Cold start và hoàn thiện
-
-## Task 63: Seed danh mục nguyên liệu
-**Files:** `db/migrations/0007_seed_ingredients.sql`
-**Owns:** —
-**Phụ thuộc:** **TQ-02** — chốt nguồn dữ liệu dinh dưỡng trước khi bắt đầu task này.
-**Trọng tâm test:** mọi dòng seed thoả `ing_kcal_range` và `ing_nutrition_all_or_none`; nhóm nguyên liệu đếm được hay gặp nhất đều có hệ số quy đổi.
-
-## Task 64: Công thức mẫu cho tài khoản mới
-**Files:** `db/migrations/0008_seed_starter_recipes.sql`, `auth_service.dart`
-**Owns:** `@BR-auth-009`
-**Trọng tâm test:** người dùng mới lên lịch được ngay một món mẫu; xoá một món mẫu không ảnh hưởng tài khoản khác (chứng minh là **bản sao** chứ không phải tham chiếu chung).
-
-## Task 65: Kiểm chứng hiệu năng
-**Files:** `apps/api/test/perf/`
-**Owns:** `@NFR-perf-001`
-**Trọng tâm test:** với 1.000 công thức và 200 mục pantry, p95 của tìm kiếm, đọc kế hoạch một tuần và đối chiếu pantry đều dưới 300 ms. Chạy trên dữ liệu sinh sẵn, không phải dữ liệu rỗng.
-
----
-
-## Bảng đối chiếu sở hữu
-
-Mỗi BR và mỗi ADR thuộc **đúng một** task.
-
-| Nhóm | Số lượng | Task sở hữu |
-|------|---------|-------------|
-| `BR-auth-*` | 10 | 4, 5, 6, 7, 8, 9, 10, 11, 49, 64 |
-| `BR-ingredient-*` | 5 | 16, 17, 18 |
-| `BR-recipe-*` | 22 | 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 50 |
-| `BR-search-*` | 8 | 34, 35, 36, 37, 60 |
-| `BR-mealplan-*` | 10 | 44, 45, 46, 47, 51, 52 |
-| `BR-nutrition-*` | 11 | 39, 40, 41, 42, 43, 48, 49 |
-| `BR-pantry-*` | 10 | 57, 58, 59 |
-| `ADR-001…010` | 10 | 1, 2, 3, 12, 17, 27, 29, 30, 34, 44 |
-| `NFR-*` | 11 | 4, 6, 11, 12, 13, 27, 29, 31, 37, 65 |
-
-**Tổng: 76 BR + 10 ADR + 11 NFR, không id nào bị bỏ sót, không id nào thuộc hai task.**
-
-## Kiểm chứng
-
-```
-melos run analyze           # dart analyze toàn monorepo, --fatal-infos
-melos run test              # unit, không cần hạ tầng (đã loại tag integration)
-melos run test:widget       # widget test của apps/app
-docker compose up -d db     # hoặc PostgreSQL cài trực tiếp trên máy
-melos run test:integration  # repository chạy trên PostgreSQL thật
-```
-
-Máy dev hiện tại dùng PostgreSQL 16 cài bằng Homebrew thay cho Docker:
-`brew services start postgresql@16`, role `app` (mật khẩu `app`), database `recipe`
-cho dev và `recipe_test` cho test tích hợp.
-
-## Việc còn treo trước khi bắt tay
-
-| # | Việc | Chặn lát cắt nào |
-|---|------|------------------|
-| TQ-01 | Chọn nhà cung cấp object storage và email | C (Task 29), A (Task 7) |
-| TQ-02 | Chốt nguồn dữ liệu dinh dưỡng nguyên liệu Việt | H (Task 63), và làm E kém giá trị nếu thiếu |
-| TQ-03 | Chọn nơi triển khai | Không chặn lát cắt nào, chỉ chặn khâu deploy |
-| TQ-04 | Có chạy `to-bdd` sinh `.feature` cho 76 BR trước khi code không | Không chặn, nhưng quyết định hình dạng của khâu test E2E |
+Tổng: 11 task BE, 9 task Web, 9 task App, 1 task đóng gói.
