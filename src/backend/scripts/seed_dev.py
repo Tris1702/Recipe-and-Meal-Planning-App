@@ -4,20 +4,23 @@ Chạy sau `alembic upgrade head` (cần danh mục nguyên liệu của migrati
 
     uv run python -m scripts.seed_dev
 
+Mật khẩu lấy từ biến môi trường SEED_DEV_PASSWORD, mặc định "matkhau123".
 Chỉ dùng cho dev, không chạy trên production. Tài khoản đã tồn tại thì bỏ qua, nên chạy lại không tạo trùng.
 """
+
+import os
 
 from dotenv import load_dotenv
 
 _ = load_dotenv()
 
+from argon2 import PasswordHasher
 from psycopg2.extras import RealDictCursor
 
-from app.db.database import connect_to_database, fetch_returned_id
+from app.db.database import connect, fetch_returned_id
 
 USERNAME = "hoa.ctp"
-# Mật khẩu giữ nguyên như tài khoản hoa.ctp trên DB cũ.
-PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$aoIn+FTOHr3y/f21tiU3KQ$AerFwBEYOF6yxhs2dibxa2n5seUq++YtFKnCqJaJYF8"
+DEFAULT_PASSWORD = "matkhau123"
 DAILY_CALORIE_GOALS = 1800
 
 # (tên, cách làm, [(product_nutrition_id, quantity theo đơn vị của định lượng)])
@@ -134,7 +137,13 @@ def seed(cursor: RealDictCursor) -> bool:
     user_id = fetch_returned_id(cursor)
     cursor.execute(
         "INSERT INTO auths (username, password_hash, user_id) VALUES (%s, %s, %s)",
-        (USERNAME, PASSWORD_HASH, user_id),
+        (
+            USERNAME,
+            PasswordHasher().hash(
+                os.environ.get("SEED_DEV_PASSWORD", DEFAULT_PASSWORD)
+            ),
+            user_id,
+        ),
     )
     cursor.executemany(
         "INSERT INTO user_health_records (user_id, weight_g, recorded_at) VALUES (%s, %s, %s)",
@@ -173,7 +182,10 @@ def seed(cursor: RealDictCursor) -> bool:
 
 
 def main() -> None:
-    conn = connect_to_database()
+    print(
+        f"seed_dev → {os.environ['DB_HOST']}:{os.environ.get('DB_PORT', '5432')}/{os.environ['DB_NAME']}"
+    )
+    conn = connect()
     try:
         with conn, conn.cursor(cursor_factory=RealDictCursor) as cursor:
             created = seed(cursor)

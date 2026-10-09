@@ -13,10 +13,13 @@ _ = load_dotenv()
 db_url = URL.create(
     "postgresql+psycopg2",
     host=os.environ["DB_HOST"],
+    port=int(os.environ.get("DB_PORT", "5432")),
     database=os.environ["DB_NAME"],
     username=os.environ["DB_USER"],
     password=os.environ["DB_PASSWORD"],
 )
+# Biến trong shell được ưu tiên hơn .env (load_dotenv không ghi đè), nên in ra DB đích để tránh chạy nhầm.
+print(f"alembic → {db_url.host}:{db_url.port}/{db_url.database}")
 # alembic.ini dùng configparser nên phải escape dấu %
 config.set_main_option(
     "sqlalchemy.url", db_url.render_as_string(hide_password=False).replace("%", "%%")

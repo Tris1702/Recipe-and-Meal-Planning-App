@@ -10,20 +10,21 @@ from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel
 
 
-def _connect() -> connection:
+def connect() -> connection:
+    """Open a connection; a missing DB_* variable raises KeyError instead of falling back to libpq defaults."""
     return psycopg2.connect(
-        host=os.getenv("DB_HOST"),
-        database=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        cursor_factory=RealDictCursor,
+        host=os.environ["DB_HOST"],
+        port=os.environ.get("DB_PORT", "5432"),
+        database=os.environ["DB_NAME"],
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
     )
 
 
 def connect_to_database() -> connection:
     while True:
         try:
-            conn = _connect()
+            conn = connect()
             print("Database connection successful!!!")
             return conn
         except psycopg2.OperationalError as e:
@@ -32,7 +33,7 @@ def connect_to_database() -> connection:
 
 
 def get_db() -> Iterator[RealDictCursor]:
-    conn = _connect()
+    conn = connect()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             yield cursor
@@ -44,7 +45,9 @@ def get_db() -> Iterator[RealDictCursor]:
         conn.close()
 
 
-DbCursor = Annotated[RealDictCursor, Depends(get_db)]
+# scope="function": commit/rollback runs before the response is sent, so a failed commit becomes a 500
+# instead of a 2xx the client already received.
+DbCursor = Annotated[RealDictCursor, Depends(get_db, scope="function")]
 
 
 class _ReturnedId(BaseModel):

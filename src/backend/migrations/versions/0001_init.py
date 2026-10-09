@@ -26,4 +26,9 @@ def downgrade() -> None:
                    user_health_records, auths, users;
         DROP FUNCTION set_updated_at();
         DROP TYPE meal_type, measure_unit, gender;
+        DO $$
+        BEGIN
+          EXECUTE 'ALTER DATABASE ' || quote_ident(current_database()) || ' RESET timezone';
+        END
+        $$;
     """)

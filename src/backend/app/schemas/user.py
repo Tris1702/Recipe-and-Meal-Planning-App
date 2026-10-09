@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class Gender(str, Enum):
@@ -18,4 +18,4 @@ class User(BaseModel):
     height_cm: float | None = None
     weight_g: float | None = None
     daily_calorie_goals: float | None = None
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime

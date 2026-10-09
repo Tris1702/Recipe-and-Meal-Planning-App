@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import jwt
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import InvalidHashError, VerificationError
 from psycopg2.extras import RealDictCursor
 
 from app.core.exception.auth_exception import (
@@ -18,7 +18,7 @@ from app.schemas.auth import Auth
 
 ph = PasswordHasher()
 JWT_SECRET = os.environ["JWT_SECRET_KEY"]
-JWT_ALGORITHM = os.environ["ALGORITHM"]
+JWT_ALGORITHM = os.environ["JWT_ALGORITHM"]
 ACCESS_TOKEN_TTL = timedelta(minutes=int(os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"]))
 _DUMMY_HASH = ph.hash("dummy-password")
 
@@ -38,7 +38,8 @@ def _authenticate(auth: Auth | None, password: str) -> bool:
     stored = auth.password_hash if auth else _DUMMY_HASH
     try:
         return ph.verify(stored, password) and auth is not None
-    except VerifyMismatchError:
+    except (VerificationError, InvalidHashError):
+        # VerificationError covers a wrong password; InvalidHashError a corrupted stored hash.
         return False
 
 
@@ -53,7 +54,7 @@ def decode_access_token(token: str) -> TokenClaims:
         token,
         JWT_SECRET,
         algorithms=[JWT_ALGORITHM],
-        options={"require": ["exp", "sub"]},
+        options={"require": ["exp", "iat", "sub"]},
     )
     return TokenClaims.model_validate(claims)
 
