@@ -6,6 +6,10 @@ parent: ./02-tech-design.md
 
 # Cơ sở dữ liệu — PostgreSQL 16
 
+> ⚠️ **Đã được thay thế (2026-10-09).** Schema 12 bảng dưới đây là bản thiết kế cũ, không phải schema đang chạy.
+> Schema chuẩn là `src/backend/migrations/sql/0001_init.sql` (Alembic), mô tả ở
+> [05-implementation-plan.md](./05-implementation-plan.md) task BE-0.1.
+
 > Phần này tách ra từ [02-tech-design.md](./02-tech-design.md). Quyết định kiến trúc liên quan: ADR-003
 > (danh mục hai tầng), ADR-004 (denormalize dinh dưỡng), ADR-005 (tìm kiếm trigram), ADR-007 (xoá mềm),
 > ADR-008 (cột `version`), ADR-010 (migration SQL thuần).

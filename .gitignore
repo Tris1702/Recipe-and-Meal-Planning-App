@@ -1,0 +1,41 @@
+# Dart / Flutter
+.dart_tool/
+.packages
+build/
+pubspec_overrides.yaml
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# macOS
+.DS_Store
+
+# Flutter platform build output
+src/frontend/app/.flutter-plugins
+src/frontend/app/.flutter-plugins-dependencies
+src/frontend/app/ios/Pods/
+src/frontend/app/android/.gradle/
+
+# Node / Vite
+node_modules/
+dist/
+
+# Local env
+.env
+.env.local
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+*.egg-info/
+
+# Sinh ra bởi task_managements/tasks.mjs build
+task_managements/board.html

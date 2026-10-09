@@ -7,6 +7,11 @@ depends-on-spec-status: draft — tech-design này phải được duyệt lại
 
 # Technical Design: Recipe & Meal Planning App — MVP
 
+> ⚠️ **Đã được thay thế (2026-10-09).** Thiết kế này viết cho stack cũ (Dart Frog, melos, `db/migrations/` chạy bằng
+> runner tự viết). Stack hiện tại là FastAPI + Vue + Flutter, migration bằng Alembic — xem
+> [05-implementation-plan.md](./05-implementation-plan.md) mục 2 và `src/backend/migrations/`. Chỉ giữ để tham
+> khảo rule; chỗ nào mâu thuẫn với 05 thì theo 05.
+
 > Tài liệu này là *how*. *What* nằm ở [01-spec.md](./01-spec.md) — mọi BR-ID dưới đây **tham chiếu**, không chép lại.
 > Schema chi tiết tách ra [03-database.md](./03-database.md). Wireframe từng màn hình tách ra [04-mock-ui.md](./04-mock-ui.md).
 

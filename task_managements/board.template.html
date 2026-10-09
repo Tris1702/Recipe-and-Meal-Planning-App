@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recipe & Meal Planning — Task board</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6eb;
+    --todo: #9aa3af; --in-progress: #3b82f6; --review: #d4a017; --done: #16a34a; --blocked: #dc2626;
+    --ready: #0d9488;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12151b; --panel: #1b1f27; --text: #e6e9ef; --muted: #9aa3af; --line: #2b313c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 20px 24px 8px; }
+  h1 { margin: 0 0 4px; font-size: 20px; }
+  .muted { color: var(--muted); }
+  main { padding: 0 24px 40px; display: grid; gap: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .panel h2 { margin: 0 0 12px; font-size: 15px; }
+
+  .progress { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; display: flex; }
+  .progress span { height: 100%; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 14px; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+  .tile.active { outline: 2px solid var(--text); }
+  .tile .n { font-size: 24px; font-weight: 600; }
+  .tile .l { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+
+  .tracks { display: grid; grid-template-columns: 60px 1fr 70px; gap: 8px 12px; align-items: center; }
+
+  table.matrix { width: 100%; border-collapse: collapse; }
+  .matrix th, .matrix td { border-top: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
+  .matrix th { color: var(--muted); font-weight: 500; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; margin: 2px 4px 2px 0; border-radius: 999px;
+          border: 1px solid var(--line); cursor: pointer; font-size: 12px; white-space: nowrap; }
+  .chip:hover { border-color: var(--text); }
+
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .filters input, .filters select { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); font: inherit; }
+  .filters input { flex: 1; min-width: 180px; }
+  .board { display: grid; grid-template-columns: repeat(5, minmax(200px, 1fr)); gap: 12px; overflow-x: auto; }
+  .col h3 { margin: 0 0 8px; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .col h3 .c { color: var(--muted); font-weight: 400; }
+  .card { background: var(--bg); border: 1px solid var(--line); border-left: 3px solid var(--todo); border-radius: 6px;
+          padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+  .card:hover { border-color: var(--text); }
+  .card .id { font-weight: 600; font-size: 12px; }
+  .card .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .tag { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+  .tag.ready { color: var(--ready); border-color: var(--ready); }
+  .tag.wait { color: var(--muted); }
+
+  dialog { width: min(760px, 94vw); max-height: 88vh; border: 1px solid var(--line); border-radius: 10px; padding: 0;
+           background: var(--panel); color: var(--text); }
+  dialog::backdrop { background: rgb(0 0 0 / .4); }
+  .dlg-head { position: sticky; top: 0; background: var(--panel); padding: 14px 18px; border-bottom: 1px solid var(--line);
+              display: flex; justify-content: space-between; gap: 12px; }
+  .dlg-head h2 { margin: 0; font-size: 16px; }
+  .dlg-body { padding: 4px 18px 18px; }
+  .dlg-body code { background: var(--bg); padding: 1px 4px; border-radius: 4px; font-size: 12.5px; }
+  .dlg-body pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; }
+  .dlg-body h2 { font-size: 14px; margin: 18px 0 6px; }
+  .card[draggable="true"] { cursor: grab; }
+  .card.dragging { opacity: .4; }
+  .col { border-radius: 8px; padding: 4px; min-height: 120px; transition: background .1s; }
+  .col.over { background: var(--line); }
+  .col.saving { opacity: .6; pointer-events: none; }
+  .mode { margin-top: 4px; font-size: 12px; }
+  .mode.live { color: var(--done); }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
+           padding: 8px 14px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  button.x { border: 0; background: none; color: var(--muted); font-size: 20px; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Recipe & Meal Planning — Task board</h1>
+  <div class="muted" id="gen"></div>
+  <div class="mode" id="mode"></div>
+</header>
+<main>
+  <section class="panel">
+    <h2 id="overall"></h2>
+    <div class="progress" id="overall-bar"></div>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Theo nhóm</h2>
+    <div class="tracks" id="tracks"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Bảng theo lát (BE → Web → App)</h2>
+    <table class="matrix" id="matrix"></table>
+  </section>
+
+  <section class="panel">
+    <h2>Kanban</h2>
+    <div class="filters">
+      <input id="q" placeholder="Tìm theo mã hoặc tên…">
+      <select id="f-track"><option value="">Mọi nhóm</option></select>
+      <select id="f-slice"><option value="">Mọi lát</option></select>
+      <select id="f-ready"><option value="">Mọi ticket</option><option value="ready">Chỉ ticket bắt đầu được</option></select>
+    </div>
+    <div class="board" id="board"></div>
+  </section>
+</main>
+
+<dialog id="dlg">
+  <div class="dlg-head">
+    <div><h2 id="dlg-title"></h2><div class="muted" id="dlg-meta"></div></div>
+    <button class="x" onclick="dlg.close()" aria-label="Đóng">×</button>
+  </div>
+  <div class="dlg-body" id="dlg-body"></div>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+let DATA = /*__DATA__*/null;
+const { statuses, statusLabel, tracks } = DATA;
+let tickets, byId;
+function load(data) {
+  DATA = data;
+  tickets = data.tickets;
+  byId = Object.fromEntries(tickets.map(t => [t.id, t]));
+}
+load(DATA);
+// Mở qua `tasks.mjs serve` thì ghi được; mở thẳng file:// thì chỉ xem.
+const LIVE = location.protocol.startsWith('http');
+const color = s => `var(--${s})`;
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const $ = id => document.getElementById(id);
+const state = { status: '', q: '', track: '', slice: '', ready: '' };
+
+function renderHeader() {
+  $('gen').textContent = `Cập nhật lúc ${DATA.generatedAt}`;
+  $('mode').className = 'mode' + (LIVE ? ' live' : ' muted');
+  $('mode').textContent = LIVE
+    ? '● Đang chạy server — kéo thẻ sang cột khác để đổi trạng thái (ghi thẳng vào tickets/<ID>.md)'
+    : 'Chế độ chỉ xem. Muốn kéo thả để đổi trạng thái: chạy node task_managements/tasks.mjs serve rồi mở http://localhost:4173';
+}
+
+function toast(msg) {
+  $('toast').textContent = msg;
+  $('toast').classList.add('show');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => $('toast').classList.remove('show'), 2500);
+}
+
+function segBar(list) {
+  return statuses.filter(s => s !== 'todo')
+    .map(s => [s, list.filter(t => t.status === s).length])
+    .filter(([, n]) => n)
+    .map(([s, n]) => `<span title="${statusLabel[s]}: ${n}" style="width:${n / list.length * 100}%;background:${color(s)}"></span>`)
+    .join('');
+}
+
+function renderSummary() {
+  const done = tickets.filter(t => t.status === 'done').length;
+  $('overall').textContent = `Tiến độ: ${done}/${tickets.length} ticket xong (${Math.round(done / tickets.length * 100)}%)`;
+  $('overall-bar').innerHTML = segBar(tickets);
+  $('tiles').innerHTML = statuses.map(s => `
+    <div class="tile ${state.status === s ? 'active' : ''}" data-s="${s}">
+      <div class="n">${tickets.filter(t => t.status === s).length}</div>
+      <div class="l"><span class="dot" style="background:${color(s)}"></span>${statusLabel[s]}</div>
+    </div>`).join('') + `
+    <div class="tile" style="cursor:default">
+      <div class="n" style="color:var(--ready)">${tickets.filter(t => t.ready).length}</div>
+      <div class="l">Bắt đầu được ngay</div>
+    </div>`;
+  document.querySelectorAll('.tile[data-s]').forEach(el => el.onclick = () => {
+    state.status = state.status === el.dataset.s ? '' : el.dataset.s;
+    renderSummary(); renderBoard();
+  });
+
+  $('tracks').innerHTML = tracks.map(tr => {
+    const l = tickets.filter(t => t.track === tr);
+    if (!l.length) return '';
+    const d = l.filter(t => t.status === 'done').length;
+    return `<b>${esc(tr)}</b><div class="progress">${segBar(l)}</div><span class="muted">${d}/${l.length}</span>`;
+  }).join('');
+}
+
+function chip(t) {
+  return `<span class="chip" data-id="${esc(t.id)}" title="${esc(t.title)} — ${statusLabel[t.status]}">
+    <span class="dot" style="background:${color(t.status)}"></span>${esc(t.id)}</span>`;
+}
+
+function renderMatrix() {
+  const slices = [...new Set(tickets.map(t => t.slice))];
+  const usedTracks = tracks.filter(tr => tickets.some(t => t.track === tr));
+  $('matrix').innerHTML = `<tr><th>Lát</th>${usedTracks.map(tr => `<th>${esc(tr)}</th>`).join('')}</tr>` +
+    slices.map(s => `<tr><td>${esc(s)}</td>${usedTracks.map(tr =>
+      `<td>${tickets.filter(t => t.slice === s && t.track === tr).map(chip).join('')}</td>`).join('')}</tr>`).join('');
+}
+
+function renderBoard() {
+  const q = state.q.toLowerCase();
+  const list = tickets.filter(t =>
+    (!state.status || t.status === state.status) &&
+    (!state.track || t.track === state.track) &&
+    (!state.slice || t.slice === state.slice) &&
+    (!state.ready || t.ready) &&
+    (!q || t.id.toLowerCase().includes(q) || t.title.toLowerCase().includes(q)));
+  $('board').innerHTML = statuses.map(s => {
+    const cards = list.filter(t => t.status === s);
+    return `<div class="col" data-status="${s}"><h3><span class="dot" style="background:${color(s)}"></span>${statusLabel[s]}
+      <span class="c">${cards.length}</span></h3>${cards.map(t => `
+      <div class="card" data-id="${esc(t.id)}" draggable="${LIVE}" style="border-left-color:${color(s)}">
+        <div class="id">${esc(t.id)}</div>
+        <div>${esc(t.title)}</div>
+        <div class="meta">
+          <span class="tag">${esc(t.slice)}</span>
+          ${t.ready ? '<span class="tag ready">bắt đầu được</span>' : ''}
+          ${t.status !== 'done' && t.waiting_on.length ? `<span class="tag wait">chờ ${t.waiting_on.slice(0, 3).join(', ')}${t.waiting_on.length > 3 ? ` +${t.waiting_on.length - 3}` : ''}</span>` : ''}
+          ${t.assignee ? `<span class="tag">@${esc(t.assignee)}</span>` : ''}
+        </div>
+      </div>`).join('')}</div>`;
+  }).join('');
+}
+
+async function moveTicket(id, status) {
+  const t = byId[id];
+  if (!t || t.status === status) return;
+  const col = document.querySelector(`.col[data-status="${status}"]`);
+  col?.classList.add('saving');
+  try {
+    const res = await fetch(`/api/tickets/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    load(body);
+    renderAll();
+    toast(`${id} → ${statusLabel[status]}`);
+  } catch (e) {
+    col?.classList.remove('saving');
+    toast(`Không lưu được ${id}: ${e.message}`);
+  }
+}
+
+if (LIVE) {
+  const board = $('board');
+  board.addEventListener('dragstart', e => {
+    const card = e.target.closest('.card');
+    if (!card) return;
+    e.dataTransfer.setData('text/plain', card.dataset.id);
+    e.dataTransfer.effectAllowed = 'move';
+    card.classList.add('dragging');
+  });
+  board.addEventListener('dragend', e => {
+    e.target.closest('.card')?.classList.remove('dragging');
+    board.querySelectorAll('.col.over').forEach(c => c.classList.remove('over'));
+  });
+  board.addEventListener('dragover', e => {
+    const col = e.target.closest('.col');
+    if (!col) return;
+    e.preventDefault();
+    board.querySelectorAll('.col.over').forEach(c => c !== col && c.classList.remove('over'));
+    col.classList.add('over');
+  });
+  board.addEventListener('drop', e => {
+    const col = e.target.closest('.col');
+    if (!col) return;
+    e.preventDefault();
+    col.classList.remove('over');
+    moveTicket(e.dataTransfer.getData('text/plain'), col.dataset.status);
+  });
+}
+
+// Chỉ cho link http(s), đường dẫn tương đối và #anchor; chặn javascript:, data:…
+const SAFE_HREF = /^(https?:\/\/|\.{1,2}\/|\/(?!\/)|#|[\w.-]+(\/[\w.-]+)*(#[\w-]*)?$)/;
+
+function md(src) {
+  const inline = s => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (all, text, href) =>
+      SAFE_HREF.test(href) ? `<a href="${href}">${text}</a>` : text);
+  const out = [];
+  let list = 0, code = null, para = [];
+  const flushPara = () => { if (para.length) out.push(`<p>${inline(para.join(' '))}</p>`); para = []; };
+  const closeLists = (to = 0) => { while (list > to) { out.push('</ul>'); list--; } };
+  for (const line of src.split('\n')) {
+    if (code !== null) {
+      if (line.startsWith('```')) { out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`); code = null; }
+      else code.push(line);
+      continue;
+    }
+    if (line.startsWith('```')) { flushPara(); closeLists(); code = []; continue; }
+    if (/^<!--.*-->$/.test(line.trim())) continue;
+    const h = line.match(/^#{1,4} (.+)/);
+    const li = line.match(/^(\s*)- (.+)/);
+    if (h) { flushPara(); closeLists(); out.push(`<h2>${inline(h[1])}</h2>`); }
+    else if (li) {
+      flushPara();
+      const depth = Math.floor(li[1].length / 2) + 1;
+      while (list < depth) { out.push('<ul>'); list++; }
+      closeLists(depth);
+      out.push(`<li>${inline(li[2])}</li>`);
+    } else if (!line.trim()) { flushPara(); closeLists(); }
+    else if (list && /^\s+/.test(line)) { out[out.length - 1] = out.at(-1).replace(/<\/li>$/, ' ' + inline(line.trim()) + '</li>'); }
+    else { closeLists(); para.push(line); }
+  }
+  flushPara(); closeLists();
+  return out.join('\n');
+}
+
+function openTicket(id) {
+  const t = byId[id];
+  if (!t) return;
+  $('dlg-title').textContent = `${t.id} · ${t.title}`;
+  $('dlg-meta').innerHTML = `<span class="dot" style="background:${color(t.status)}"></span> ${statusLabel[t.status]}
+    · ${esc(t.slice)} · ${esc(t.track)}${t.assignee ? ` · @${esc(t.assignee)}` : ''} · cập nhật ${esc(t.updated)}
+    · <a href="${esc(t.file)}">${esc(t.file)}</a>`;
+  const deps = t.depends_on.length
+    ? `<p><b>Phụ thuộc:</b> ${t.depends_on.map(d => byId[d] ? chip(byId[d]) : esc(d)).join('')}</p>` : '';
+  const blocks = tickets.filter(x => x.depends_on.includes(t.id));
+  const after = blocks.length ? `<p><b>Mở khoá cho:</b> ${blocks.map(chip).join('')}</p>` : '';
+  $('dlg-body').innerHTML = deps + after + md(t.body);
+  if (!$('dlg').open) $('dlg').showModal();
+}
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-id]');
+  if (el) openTicket(el.dataset.id);
+});
+$('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').close(); });
+
+for (const tr of tracks) if (tickets.some(t => t.track === tr)) $('f-track').add(new Option(tr, tr));
+for (const s of new Set(tickets.map(t => t.slice))) $('f-slice').add(new Option(s, s));
+$('q').oninput = e => { state.q = e.target.value; renderBoard(); };
+$('f-track').onchange = e => { state.track = e.target.value; renderBoard(); };
+$('f-slice').onchange = e => { state.slice = e.target.value; renderBoard(); };
+$('f-ready').onchange = e => { state.ready = e.target.value; renderBoard(); };
+
+function renderAll() { renderHeader(); renderSummary(); renderMatrix(); renderBoard(); }
+renderAll();
+</script>
+</body>
+</html>

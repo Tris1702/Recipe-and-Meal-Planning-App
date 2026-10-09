@@ -1,0 +1,20 @@
+[
+  {
+    "label": "Task board: serve (kéo thả)",
+    "command": "(sleep 0.5 && open http://localhost:4173) & node task_managements/tasks.mjs serve",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "no_focus"
+  },
+  {
+    "label": "Task board: build & open",
+    "command": "node task_managements/tasks.mjs build && open task_managements/board.html",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "no_focus"
+  },
+  {
+    "label": "Run Be: Run and watch",
+    "command": "uv run fastapi dev app/main.py",
+    "cwd": "$ZED_WORKTREE_ROOT/src/backend",
+    "reveal": "no_focus"
+  }
+]
