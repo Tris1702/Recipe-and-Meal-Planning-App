@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-B2, WEB-B1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L354
+source: planning/05-implementation-plan.md
 ---
 
 # WEB-B2 · Trang cân nặng

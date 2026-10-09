@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-0.1, BE-A2]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L325
+source: planning/05-implementation-plan.md
 ---
 
 # BE-B2 · Lịch sử cân nặng

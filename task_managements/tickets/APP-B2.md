@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-B2, APP-B1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L373
+source: planning/05-implementation-plan.md
 ---
 
 # APP-B2 · Màn cân nặng

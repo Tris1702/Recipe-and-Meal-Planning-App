@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-E2, WEB-E1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L551
+source: planning/05-implementation-plan.md
 ---
 
 # WEB-E2 · Trang "Hôm nay"

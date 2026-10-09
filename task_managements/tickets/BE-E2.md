@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-E1, BE-B1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L527
+source: planning/05-implementation-plan.md
 ---
 
 # BE-E2 · Tổng calo theo ngày

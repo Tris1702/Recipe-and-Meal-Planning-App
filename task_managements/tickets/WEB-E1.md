@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-E1, WEB-D1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L540
+source: planning/05-implementation-plan.md
 ---
 
 # WEB-E1 · Nhật ký bữa ăn theo ngày

@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-0.1, BE-A2]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L385
+source: planning/05-implementation-plan.md
 ---
 
 # BE-C1 · Danh mục nguyên liệu dùng chung

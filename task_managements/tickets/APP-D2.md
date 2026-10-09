@@ -7,7 +7,7 @@ status: todo
 depends_on: [APP-C1, APP-D1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L497
+source: planning/05-implementation-plan.md
 ---
 
 # APP-D2 · Soạn và sửa công thức

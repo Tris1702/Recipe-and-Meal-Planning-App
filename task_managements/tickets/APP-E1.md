@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-E1, APP-D1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L564
+source: planning/05-implementation-plan.md
 ---
 
 # APP-E1 · Nhật ký bữa ăn theo ngày

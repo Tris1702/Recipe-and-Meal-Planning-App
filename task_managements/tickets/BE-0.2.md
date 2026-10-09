@@ -7,7 +7,7 @@ status: todo
 depends_on: []
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L174
+source: planning/05-implementation-plan.md
 ---
 
 # BE-0.2 · Dọn nền backend
@@ -15,10 +15,10 @@ source: planning/05-implementation-plan.md#L174
 **Input:** code backend hiện tại; review auth ngày 2026-10-08.
 
 **Việc cần làm:**
-- `app/core/config.py`: đọc env bằng `pydantic-settings`, **fail ngay khi khởi động** nếu thiếu biến. Biến DB đã
-  đổi tên thành `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` ở BE-0.1; `app/db/database.py` và
-  `migrations/env.py` chuyển sang đọc từ config này.
-  Chỉ chấp nhận `JWT_ALGORITHM` ∈ {HS256, HS384, HS512}, `JWT_SECRET_KEY` dài ≥ 32 ký tự.
+- `app/core/config.py`: đọc env bằng `pydantic-settings`, **fail ngay khi khởi động** nếu thiếu biến. Tên biến đã
+  chốt ở BE-0.1: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `JWT_SECRET_KEY`, `JWT_ALGORITHM`,
+  `ACCESS_TOKEN_EXPIRE_MINUTES`; `app/db/database.py`, `auth_service.py` và `migrations/env.py` chuyển sang đọc
+  từ config này. Chỉ chấp nhận `JWT_ALGORITHM` ∈ {HS256, HS384, HS512}, `JWT_SECRET_KEY` dài ≥ 32 ký tự.
 - Thêm `.env.example` liệt kê đủ biến, không có giá trị thật.
 - `app/core/errors.py`: exception handler chung — `AppException(status_code, message)` → JSON `{"detail": ...}`.
   Lỗi không lường trước → `logger.exception(...)` + 500. Bỏ các `try/except` trả `Response` trong router.

@@ -3,11 +3,11 @@ id: BE-0.1
 title: Chuẩn hoá schema và migration
 slice: Phase 0 — Nền móng
 track: BE
-status: done
+status: review
 depends_on: []
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L134
+source: planning/05-implementation-plan.md
 ---
 
 # BE-0.1 · Chuẩn hoá schema và migration
@@ -15,8 +15,8 @@ source: planning/05-implementation-plan.md#L134
 **Input:** `init_tables_recipe.sql` (schema gốc, có lỗi), DB local đang chạy.
 
 **Việc cần làm:**
-- Dựng Alembic trong `src/backend`: `migrations/env.py` lấy kết nối từ `.env` (`DB_HOST`, `DB_NAME`, `DB_USER`,
-  `DB_PASSWORD`), bật `transaction_per_migration=True` để mỗi revision chạy trong một transaction riêng.
+- Dựng Alembic trong `src/backend`: `migrations/env.py` lấy kết nối từ `.env` (`DB_HOST`, `DB_PORT` (mặc định
+  5432), `DB_NAME`, `DB_USER`, `DB_PASSWORD`), in DB đích trước khi chạy, bật `transaction_per_migration=True` để mỗi revision chạy trong một transaction riêng.
   Không dùng autogenerate (không có model SQLAlchemy); mỗi revision trong `migrations/versions/` chạy một file
   SQL viết tay trong `migrations/sql/` và có `downgrade()`.
 - Đưa `init_tables_recipe.sql` thành `migrations/sql/0001_init.sql`, sửa luôn trong file đó:
@@ -24,7 +24,8 @@ source: planning/05-implementation-plan.md#L134
   - `auths.username` thêm `UNIQUE`.
   - Đổi tên `user_heath_records` → `user_health_records`, bỏ `UNIQUE` ở `user_id`, thêm
     `recorded_at timestamp NOT NULL DEFAULT now()`.
-  - `users.birth_date` → `date`; `users.created_at` → `NOT NULL`.
+  - `users.birth_date` → `date`; `users.created_at` → `NOT NULL`. `users.height_cm`, `weight_g`,
+    `daily_calorie_goals`, `user_health_records.weight_g` thêm `CHECK (> 0)` (khoảng hợp lệ cụ thể kiểm ở app).
   - `recipes` thêm `user_id integer NOT NULL REFERENCES users(id)` và `created_at`, `updated_at`; `name` → `NOT NULL`.
   - `meals.meal_type` → `NOT NULL`.
   - `meal_items` thêm `portion decimal NOT NULL DEFAULT 1 CHECK (portion > 0)`.
@@ -32,12 +33,15 @@ source: planning/05-implementation-plan.md#L134
   - Khoá ngoại khai báo ngay tại cột, không `DEFERRABLE`. `recipe_items.recipe_id`, `meal_items.meal_id` →
     `ON DELETE CASCADE`; các khoá khác giữ mặc định (chặn xoá dòng cha đang được dùng, ví dụ công thức đã có
     trong bữa ăn).
-  - Index thường (không `UNIQUE`): `recipes(user_id)`, `meals(user_id, eaten_at)`,
-    `user_health_records(user_id, recorded_at)`, `recipe_items(product_nutrition_id)`, `meal_items(recipe_id)`.
+  - Index thường (không `UNIQUE`), đặt tên rõ: `recipes(user_id, updated_at DESC, id DESC)`,
+    `meals(user_id, eaten_at)`, `user_health_records(user_id, recorded_at)`, `recipe_items(product_nutrition_id)`,
+    `meal_items(meal_id)`, `meal_items(recipe_id)`.
+  - Đặt múi giờ DB `Asia/Ho_Chi_Minh` (xem mục 3, Thời gian).
   - Trigger `set_updated_at` tự gán `updated_at = now()` khi UPDATE `recipes`, `user_health_records`.
 - `migrations/sql/0002_products.sql`: danh mục nguyên liệu dùng chung (29 nguyên liệu, 32 định lượng), chạy ở
   mọi môi trường.
 - `scripts/seed_dev.py`: dữ liệu mẫu chỉ cho dev (tài khoản `hoa.ctp`, 15 công thức, lịch sử cân nặng, bữa ăn).
+  Mật khẩu lấy từ `SEED_DEV_PASSWORD` (mặc định `matkhau123`) và hash lúc chạy, không lưu hash trong repo.
   Chạy lại khi tài khoản đã có thì bỏ qua.
 - DB local cũ: drop rồi chạy lại từ đầu (toàn bộ dữ liệu cũ đã nằm trong `0002` và `seed_dev.py`).
 
@@ -46,7 +50,9 @@ source: planning/05-implementation-plan.md#L134
 
 **Xong khi:**
 - `uv run alembic upgrade head` trên DB trống chạy hết không lỗi. Chạy lần hai không có gì mới.
-- `uv run alembic downgrade base` đưa DB về trống (không sót bảng, kiểu enum, function), rồi `upgrade head` lại được.
+- Trên DB chưa chạy `seed_dev`: `uv run alembic downgrade base` đưa DB về trống (không sót bảng, kiểu enum,
+  function, cấu hình múi giờ), rồi `upgrade head` lại được. Đã chạy `seed_dev` thì `downgrade` của `0002` báo lỗi
+  (cố ý, không xoá ngầm công thức của user); muốn làm lại thì drop DB.
 - Insert 2 dòng `auths` cùng username → lỗi unique; insert `meals` thiếu `meal_type` → lỗi not null.
 - `init_tables_recipe.sql` ở gốc repo đã xoá, schema chỉ còn một nguồn là `migrations/sql/`.
 

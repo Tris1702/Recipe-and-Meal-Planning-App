@@ -25,15 +25,20 @@ const STATUS_LABEL = {
 const TRACKS = ['BE', 'WEB', 'APP', 'OPS'];
 const ID_RE = /\b(?:BE|WEB|APP|OPS)-[0-9A-Z]+(?:\.[0-9]+)?\b/g;
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Ngày theo giờ máy (sv-SE cho dạng YYYY-MM-DD), không theo UTC.
+const today = () => new Date().toLocaleDateString('sv-SE');
+const readText = file => readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+const TASK_RE = /^### \[([ xX])\] (\S+) · (.+)$/;
 
 // ---------- split ----------
 
 function parsePlan() {
-  const lines = readFileSync(PLAN, 'utf8').split('\n');
+  const lines = readText(PLAN).split('\n');
   const tasks = [];
   let slice = null;
   let cur = null;
+  let seenTitle = false;
+  let inFence = false;
 
   const close = () => {
     if (!cur) return;
@@ -42,10 +47,22 @@ function parsePlan() {
     cur = null;
   };
 
-  lines.forEach((line, i) => {
-    const h1 = line.match(/^# (?!Recipe)(.+)$/);
-    const task = line.match(/^### \[( |x)\] (\S+) · (.+)$/);
-    if (h1) { close(); slice = h1[1].trim(); return; }
+  lines.forEach(line => {
+    // Trong khối code (```), dòng "# ..." hay "---" là nội dung, không phải tiêu đề/ranh giới.
+    if (line.startsWith('```')) inFence = !inFence;
+    if (inFence || line.startsWith('```')) {
+      if (cur) cur.body.push(line);
+      return;
+    }
+    const h1 = line.match(/^# (.+)$/);
+    const task = line.match(TASK_RE);
+    if (h1) {
+      close();
+      // H1 đầu tiên là tên tài liệu; các H1 sau là lát cắt.
+      if (seenTitle) slice = h1[1].trim();
+      seenTitle = true;
+      return;
+    }
     if (task) {
       close();
       cur = {
@@ -53,8 +70,7 @@ function parsePlan() {
         title: task[3].trim(),
         slice,
         track: task[2].split('-')[0],
-        checked: task[1] === 'x',
-        line: i + 1,
+        checked: task[1] !== ' ',
         body: [],
       };
       return;
@@ -90,7 +106,7 @@ function renderTicket(t, { status, assignee, updated, notes }) {
     `depends_on: [${t.depends_on.join(', ')}]`,
     `assignee:${assignee ? ` ${assignee}` : ''}`,
     `updated: ${updated}`,
-    `source: planning/05-implementation-plan.md#L${t.line}`,
+    'source: planning/05-implementation-plan.md',
     '---',
     '',
     `# ${t.id} · ${t.title}`,
@@ -115,7 +131,7 @@ function split() {
       created++;
       continue;
     }
-    const old = readFileSync(file, 'utf8');
+    const old = readText(file);
     const prev = parseTicket(file);
     const notesAt = old.indexOf(`\n${NOTES_HEADING}\n`);
     const notes = notesAt === -1 ? NOTES_DEFAULT : old.slice(notesAt + 1);
@@ -133,24 +149,26 @@ function split() {
 
 // ---------- build ----------
 
+const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
+const TICKET_ID_RE = /^[A-Z]+-[0-9A-Z.]+$/;
+
 function parseTicket(file) {
-  const text = readFileSync(file, 'utf8');
-  const m = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  if (!m) throw new Error(`${file}: thiếu frontmatter`);
+  const m = readText(file).match(FRONTMATTER_RE);
+  if (!m) throw new Error(`${relative(ROOT, file)}: thiếu frontmatter`);
   const meta = {};
   for (const line of m[1].split('\n')) {
     const kv = line.match(/^(\w+):\s*(.*)$/);
-    if (!kv) continue;
-    let v = kv[2].trim();
-    if (v.startsWith('[') && v.endsWith(']')) {
-      v = v.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean);
-    }
-    meta[kv[1]] = v;
+    if (kv) meta[kv[1]] = kv[2].trim();
   }
+  const where = relative(ROOT, file);
+  if (!TICKET_ID_RE.test(meta.id ?? '')) throw new Error(`${where}: id "${meta.id}" không hợp lệ`);
   if (!STATUSES.includes(meta.status)) {
-    throw new Error(`${relative(ROOT, file)}: status "${meta.status}" không hợp lệ (${STATUSES.join(' | ')})`);
+    throw new Error(`${where}: status "${meta.status}" không hợp lệ (${STATUSES.join(' | ')})`);
   }
-  meta.depends_on ??= [];
+  // Chỉ depends_on là danh sách; các trường khác (vd. title có "[...]") giữ nguyên chuỗi.
+  meta.depends_on = (meta.depends_on ?? '').replace(/^\[|\]$/g, '').split(',').map(s => s.trim()).filter(Boolean);
+  const badDep = meta.depends_on.find(d => !TICKET_ID_RE.test(d));
+  if (badDep) throw new Error(`${where}: depends_on có mã không hợp lệ "${badDep}"`);
   meta.body = m[2].replace(/^# .*\n+/, '');
   meta.file = relative(HERE, file);
   return meta;
@@ -163,6 +181,8 @@ function loadTickets() {
     .map(f => parseTicket(join(TICKETS, f)));
   const rank = id => (order.indexOf(id) === -1 ? 1e9 : order.indexOf(id));
   tickets.sort((a, b) => rank(a.id) - rank(b.id));
+  const orphans = tickets.filter(t => !order.includes(t.id)).map(t => t.id);
+  if (orphans.length) console.warn(`cảnh báo: ticket không còn trong plan: ${orphans.join(', ')}`);
 
   const byId = Object.fromEntries(tickets.map(t => [t.id, t]));
   for (const t of tickets) {
@@ -177,7 +197,7 @@ function loadTickets() {
 function syncPlanCheckboxes(tickets) {
   const status = Object.fromEntries(tickets.map(t => [t.id, t.status]));
   const before = readFileSync(PLAN, 'utf8');
-  const after = before.replace(/^### \[( |x)\] (\S+) · /gm, (all, _box, id) =>
+  const after = before.replace(/^### \[([ xX])\] (\S+) · /gm, (all, _box, id) =>
     id in status ? `### [${status[id] === 'done' ? 'x' : ' '}] ${id} · ` : all);
   if (after !== before) {
     writeFileSync(PLAN, after);
@@ -204,8 +224,9 @@ function renderMarkdown(tickets) {
   const out = [
     '# Tổng quan task',
     '',
-    `> Sinh tự động bởi \`node task_managements/tasks.mjs build\` lúc ${new Date().toLocaleString('vi-VN')}.`,
-    '> Đừng sửa tay file này — sửa `status` trong `tickets/<ID>.md` rồi build lại. Bản trực quan: [board.html](board.html).',
+    '> Sinh tự động bởi `node task_managements/tasks.mjs build`. Đừng sửa tay file này — sửa `status` trong',
+    '> `tickets/<ID>.md` rồi build lại. Bản kanban: chạy `node task_managements/tasks.mjs serve` (kéo thả để đổi',
+    '> trạng thái), hoặc mở `board.html` sinh ra sau khi build (file này không commit).',
     '',
     `**Tiến độ:** ${c.done}/${total} xong · \`${bar(pct(c.done, total))}\` ${pct(c.done, total)}%`,
     '',
@@ -261,7 +282,8 @@ function boardData(tickets) {
 
 function renderHtml(tickets) {
   const data = JSON.stringify(boardData(tickets)).replace(/</g, '\\u003c');
-  return readFileSync(join(HERE, 'board.template.html'), 'utf8').replace('/*__DATA__*/null', data);
+  // Thay bằng hàm: chuỗi thay thế thường sẽ diễn giải "$&", "$'"… có trong nội dung ticket.
+  return readFileSync(join(HERE, 'board.template.html'), 'utf8').replace('/*__DATA__*/null', () => data);
 }
 
 function build({ quiet = false } = {}) {
@@ -279,26 +301,55 @@ function build({ quiet = false } = {}) {
 
 // ---------- serve ----------
 
-function setStatus(id, status) {
-  if (!/^[A-Z]+-[0-9A-Z.]+$/.test(id)) throw new HttpError(400, `mã ticket không hợp lệ: ${id}`);
-  if (!STATUSES.includes(status)) throw new HttpError(400, `status không hợp lệ: ${status}`);
-  const file = join(TICKETS, `${id}.md`);
-  if (!existsSync(file)) throw new HttpError(404, `không có ticket ${id}`);
-  const text = readFileSync(file, 'utf8');
-  const end = text.indexOf('\n---', 3);
-  const head = text.slice(0, end)
-    .replace(/^status:.*$/m, `status: ${status}`)
-    .replace(/^updated:.*$/m, `updated: ${today()}`);
-  writeFileSync(file, head + text.slice(end));
-}
-
 class HttpError extends Error {
   constructor(code, message) { super(message); this.code = code; }
+}
+
+function ticketFile(id) {
+  if (!TICKET_ID_RE.test(id)) throw new HttpError(400, `mã ticket không hợp lệ: ${id}`);
+  const file = join(TICKETS, `${id}.md`);
+  if (!existsSync(file)) throw new HttpError(404, `không có ticket ${id}`);
+  return file;
+}
+
+function setStatus(id, status) {
+  if (!STATUSES.includes(status)) throw new HttpError(400, `status không hợp lệ: ${status}`);
+  const file = ticketFile(id);
+  const m = readText(file).match(FRONTMATTER_RE);
+  if (!m || !/^status:/m.test(m[1]) || !/^updated:/m.test(m[1])) {
+    throw new HttpError(422, `${id}.md thiếu frontmatter hoặc dòng status/updated`);
+  }
+  const head = m[1]
+    .replace(/^status:.*$/m, `status: ${status}`)
+    .replace(/^updated:.*$/m, `updated: ${today()}`);
+  writeFileSync(file, `---\n${head}\n---\n${m[2]}`);
+}
+
+const MAX_BODY = 16 * 1024;
+
+async function readJson(req) {
+  let raw = '';
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > MAX_BODY) throw new HttpError(413, 'body quá lớn');
+  }
+  let body;
+  try {
+    body = JSON.parse(raw || '{}');
+  } catch {
+    throw new HttpError(400, 'body không phải JSON hợp lệ');
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new HttpError(400, 'body phải là object JSON');
+  }
+  return body;
 }
 
 async function serve() {
   const { createServer } = await import('node:http');
   const port = Number(process.env.PORT ?? 4173);
+  // Chặn DNS rebinding: chỉ nhận request gửi tới đúng localhost:<port>.
+  const allowedHosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`]);
   build({ quiet: true });
 
   const send = (res, code, body, type = 'application/json; charset=utf-8') => {
@@ -308,6 +359,7 @@ async function serve() {
 
   createServer(async (req, res) => {
     try {
+      if (!allowedHosts.has(req.headers.host ?? '')) throw new HttpError(403, 'host không được phép');
       const url = new URL(req.url, 'http://localhost');
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/board.html')) {
         return send(res, 200, renderHtml(loadTickets()), 'text/html; charset=utf-8');
@@ -315,11 +367,17 @@ async function serve() {
       if (req.method === 'GET' && url.pathname === '/api/data') {
         return send(res, 200, boardData(loadTickets()));
       }
+      const md = url.pathname.match(/^\/tickets\/([^/]+)\.md$/);
+      if (req.method === 'GET' && md) {
+        return send(res, 200, readText(ticketFile(decodeURIComponent(md[1]))), 'text/plain; charset=utf-8');
+      }
       const m = url.pathname.match(/^\/api\/tickets\/([^/]+)$/);
       if (req.method === 'PATCH' && m) {
-        let raw = '';
-        for await (const chunk of req) raw += chunk;
-        const { status } = JSON.parse(raw || '{}');
+        const origin = req.headers.origin;
+        if (origin && !allowedHosts.has(origin.replace(/^https?:\/\//, ''))) {
+          throw new HttpError(403, 'origin không được phép');
+        }
+        const { status } = await readJson(req);
         const id = decodeURIComponent(m[1]);
         setStatus(id, status);
         console.log(`${id} → ${status}`);

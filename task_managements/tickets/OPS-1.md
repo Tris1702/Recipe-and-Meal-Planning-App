@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-0.1, BE-0.2, WEB-0.1, BE-A1, BE-A2, WEB-A1, BE-B1, BE-B2, WEB-B1, WEB-B2, BE-C1, WEB-C1, BE-D1, BE-D2, WEB-D1, WEB-D2, BE-E1, BE-E2, WEB-E1, WEB-E2]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L580
+source: planning/05-implementation-plan.md
 ---
 
 # OPS-1 · Chạy toàn bộ bằng Docker Compose

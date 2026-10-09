@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-0.1, BE-C1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L429
+source: planning/05-implementation-plan.md
 ---
 
 # BE-D1 · CRUD công thức

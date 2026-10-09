@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-0.2]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L203
+source: planning/05-implementation-plan.md
 ---
 
 # WEB-0.1 · Khởi tạo dự án Vue

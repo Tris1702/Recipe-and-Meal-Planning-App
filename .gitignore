@@ -14,10 +14,14 @@ pubspec_overrides.yaml
 .DS_Store
 
 # Flutter platform build output
-apps/app/.flutter-plugins
-apps/app/.flutter-plugins-dependencies
-apps/app/ios/Pods/
-apps/app/android/.gradle/
+src/frontend/app/.flutter-plugins
+src/frontend/app/.flutter-plugins-dependencies
+src/frontend/app/ios/Pods/
+src/frontend/app/android/.gradle/
+
+# Node / Vite
+node_modules/
+dist/
 
 # Local env
 .env
@@ -29,6 +33,9 @@ __pycache__/
 *.pyc
 .ruff_cache/
 .pytest_cache/
+.mypy_cache/
+.coverage
+*.egg-info/
 
 # Sinh ra bởi task_managements/tasks.mjs build
 task_managements/board.html

@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-C1, APP-A1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L417
+source: planning/05-implementation-plan.md
 ---
 
 # APP-C1 · Ô chọn nguyên liệu

@@ -1,23 +1,24 @@
 # Tổng quan task
 
-> Sinh tự động bởi `node task_managements/tasks.mjs build` lúc 15:33:53 9/10/2026.
-> Đừng sửa tay file này — sửa `status` trong `tickets/<ID>.md` rồi build lại. Bản trực quan: [board.html](board.html).
+> Sinh tự động bởi `node task_managements/tasks.mjs build`. Đừng sửa tay file này — sửa `status` trong
+> `tickets/<ID>.md` rồi build lại. Bản kanban: chạy `node task_managements/tasks.mjs serve` (kéo thả để đổi
+> trạng thái), hoặc mở `board.html` sinh ra sau khi build (file này không commit).
 
-**Tiến độ:** 1/30 xong · `░░░░░░░░░░` 3%
+**Tiến độ:** 0/30 xong · `░░░░░░░░░░` 0%
 
 | Trạng thái | Số ticket |
 |---|---|
 | ⬜ Chưa làm | 29 |
 | 🟦 Đang làm | 0 |
-| 🟨 Đang review | 0 |
-| ✅ Xong | 1 |
+| 🟨 Đang review | 1 |
+| ✅ Xong | 0 |
 | 🟥 Bị chặn | 0 |
 
 ## Theo nhóm
 
 | Nhóm | Xong | Tiến độ |
 |---|---|---|
-| BE | 1/11 | `█░░░░░░░░░` 9% |
+| BE | 0/11 | `░░░░░░░░░░` 0% |
 | WEB | 0/9 | `░░░░░░░░░░` 0% |
 | APP | 0/9 | `░░░░░░░░░░` 0% |
 | OPS | 0/1 | `░░░░░░░░░░` 0% |
@@ -26,7 +27,7 @@
 
 | Lát | BE | Web | App | Ops |
 |---|---|---|---|---|
-| Phase 0 — Nền móng | ✅ [BE-0.1](tickets/BE-0.1.md)<br>⬜ [BE-0.2](tickets/BE-0.2.md) | ⬜ [WEB-0.1](tickets/WEB-0.1.md) | ⬜ [APP-0.1](tickets/APP-0.1.md) |  |
+| Phase 0 — Nền móng | 🟨 [BE-0.1](tickets/BE-0.1.md)<br>⬜ [BE-0.2](tickets/BE-0.2.md) | ⬜ [WEB-0.1](tickets/WEB-0.1.md) | ⬜ [APP-0.1](tickets/APP-0.1.md) |  |
 | Lát A — Tài khoản | ⬜ [BE-A1](tickets/BE-A1.md)<br>⬜ [BE-A2](tickets/BE-A2.md) | ⬜ [WEB-A1](tickets/WEB-A1.md) | ⬜ [APP-A1](tickets/APP-A1.md) |  |
 | Lát B — Hồ sơ và cân nặng | ⬜ [BE-B1](tickets/BE-B1.md)<br>⬜ [BE-B2](tickets/BE-B2.md) | ⬜ [WEB-B1](tickets/WEB-B1.md)<br>⬜ [WEB-B2](tickets/WEB-B2.md) | ⬜ [APP-B1](tickets/APP-B1.md)<br>⬜ [APP-B2](tickets/APP-B2.md) |  |
 | Lát C — Nguyên liệu | ⬜ [BE-C1](tickets/BE-C1.md) | ⬜ [WEB-C1](tickets/WEB-C1.md) | ⬜ [APP-C1](tickets/APP-C1.md) |  |
@@ -40,4 +41,4 @@
 
 ## Đang làm / review / bị chặn
 
-_Không có._
+- 🟨 [BE-0.1](tickets/BE-0.1.md) Chuẩn hoá schema và migration

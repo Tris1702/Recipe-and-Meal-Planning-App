@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-E2, APP-E1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L570
+source: planning/05-implementation-plan.md
 ---
 
 # APP-E2 · Màn "Hôm nay"

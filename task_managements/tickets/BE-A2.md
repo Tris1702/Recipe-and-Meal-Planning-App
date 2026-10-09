@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-A1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L259
+source: planning/05-implementation-plan.md
 ---
 
 # BE-A2 · Bảo vệ route bằng token

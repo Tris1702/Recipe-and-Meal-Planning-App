@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-D1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L448
+source: planning/05-implementation-plan.md
 ---
 
 # BE-D2 · Tính calo và giá cho công thức

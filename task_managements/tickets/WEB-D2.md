@@ -7,7 +7,7 @@ status: todo
 depends_on: [WEB-C1, WEB-D1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L475
+source: planning/05-implementation-plan.md
 ---
 
 # WEB-D2 · Soạn và sửa công thức

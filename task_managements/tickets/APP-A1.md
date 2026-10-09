@@ -7,7 +7,7 @@ status: todo
 depends_on: [BE-A1, BE-A2, APP-0.1]
 assignee:
 updated: 2026-10-09
-source: planning/05-implementation-plan.md#L294
+source: planning/05-implementation-plan.md
 ---
 
 # APP-A1 · Màn đăng nhập và đăng ký

@@ -185,19 +185,19 @@ function renderSummary() {
     const l = tickets.filter(t => t.track === tr);
     if (!l.length) return '';
     const d = l.filter(t => t.status === 'done').length;
-    return `<b>${tr}</b><div class="progress">${segBar(l)}</div><span class="muted">${d}/${l.length}</span>`;
+    return `<b>${esc(tr)}</b><div class="progress">${segBar(l)}</div><span class="muted">${d}/${l.length}</span>`;
   }).join('');
 }
 
 function chip(t) {
-  return `<span class="chip" data-id="${t.id}" title="${esc(t.title)} — ${statusLabel[t.status]}">
-    <span class="dot" style="background:${color(t.status)}"></span>${t.id}</span>`;
+  return `<span class="chip" data-id="${esc(t.id)}" title="${esc(t.title)} — ${statusLabel[t.status]}">
+    <span class="dot" style="background:${color(t.status)}"></span>${esc(t.id)}</span>`;
 }
 
 function renderMatrix() {
   const slices = [...new Set(tickets.map(t => t.slice))];
   const usedTracks = tracks.filter(tr => tickets.some(t => t.track === tr));
-  $('matrix').innerHTML = `<tr><th>Lát</th>${usedTracks.map(tr => `<th>${tr}</th>`).join('')}</tr>` +
+  $('matrix').innerHTML = `<tr><th>Lát</th>${usedTracks.map(tr => `<th>${esc(tr)}</th>`).join('')}</tr>` +
     slices.map(s => `<tr><td>${esc(s)}</td>${usedTracks.map(tr =>
       `<td>${tickets.filter(t => t.slice === s && t.track === tr).map(chip).join('')}</td>`).join('')}</tr>`).join('');
 }
@@ -214,8 +214,8 @@ function renderBoard() {
     const cards = list.filter(t => t.status === s);
     return `<div class="col" data-status="${s}"><h3><span class="dot" style="background:${color(s)}"></span>${statusLabel[s]}
       <span class="c">${cards.length}</span></h3>${cards.map(t => `
-      <div class="card" data-id="${t.id}" draggable="${LIVE}" style="border-left-color:${color(s)}">
-        <div class="id">${t.id}</div>
+      <div class="card" data-id="${esc(t.id)}" draggable="${LIVE}" style="border-left-color:${color(s)}">
+        <div class="id">${esc(t.id)}</div>
         <div>${esc(t.title)}</div>
         <div class="meta">
           <span class="tag">${esc(t.slice)}</span>
@@ -278,11 +278,15 @@ if (LIVE) {
   });
 }
 
+// Chỉ cho link http(s), đường dẫn tương đối và #anchor; chặn javascript:, data:…
+const SAFE_HREF = /^(https?:\/\/|\.{0,2}\/|#|[\w.-]+(\/[\w.-]+)*(#[\w-]*)?$)/;
+
 function md(src) {
   const inline = s => esc(s)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (all, text, href) =>
+      SAFE_HREF.test(href) ? `<a href="${href}">${text}</a>` : text);
   const out = [];
   let list = 0, code = null, para = [];
   const flushPara = () => { if (para.length) out.push(`<p>${inline(para.join(' '))}</p>`); para = []; };
@@ -317,10 +321,10 @@ function openTicket(id) {
   if (!t) return;
   $('dlg-title').textContent = `${t.id} · ${t.title}`;
   $('dlg-meta').innerHTML = `<span class="dot" style="background:${color(t.status)}"></span> ${statusLabel[t.status]}
-    · ${esc(t.slice)} · ${t.track}${t.assignee ? ` · @${esc(t.assignee)}` : ''} · cập nhật ${esc(t.updated)}
+    · ${esc(t.slice)} · ${esc(t.track)}${t.assignee ? ` · @${esc(t.assignee)}` : ''} · cập nhật ${esc(t.updated)}
     · <a href="${esc(t.file)}">${esc(t.file)}</a>`;
   const deps = t.depends_on.length
-    ? `<p><b>Phụ thuộc:</b> ${t.depends_on.map(d => byId[d] ? chip(byId[d]) : d).join('')}</p>` : '';
+    ? `<p><b>Phụ thuộc:</b> ${t.depends_on.map(d => byId[d] ? chip(byId[d]) : esc(d)).join('')}</p>` : '';
   const blocks = tickets.filter(x => x.depends_on.includes(t.id));
   const after = blocks.length ? `<p><b>Mở khoá cho:</b> ${blocks.map(chip).join('')}</p>` : '';
   $('dlg-body').innerHTML = deps + after + md(t.body);
