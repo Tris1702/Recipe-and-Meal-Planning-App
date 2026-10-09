@@ -69,3 +69,7 @@ source: planning/05-implementation-plan.md
   - Đổi tên biến DB thành `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` (sớm hơn BE-0.2) để `migrations/env.py`
     không đọc nhầm biến `USER` của hệ điều hành.
   - `init_tables_recipe.sql` ở gốc repo đã xoá.
+- 2026-10-09: xử lý review PR #1 (commit `3aa4e26`): thêm index `meal_items(meal_id)`, đặt tên index, index
+  `recipes(user_id, updated_at DESC, id DESC)`, `CHECK (> 0)` cho cân nặng/chiều cao/mục tiêu, múi giờ DB
+  `Asia/Ho_Chi_Minh`, `DB_PORT`, `JWT_ALGORITHM`, mật khẩu seed dev lấy từ `SEED_DEV_PASSWORD`. `0001` sửa sau
+  khi đã chạy → DB dev cũ phải tạo lại (xem `src/backend/migrations/README.md`).

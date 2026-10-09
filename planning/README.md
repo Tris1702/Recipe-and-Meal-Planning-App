@@ -49,7 +49,7 @@ theo của pipeline nếu muốn khoá hành vi thành living docs trước khi 
 ## Trạng thái và bước tiếp theo
 
 Đang làm theo [05-implementation-plan.md](./05-implementation-plan.md) (rev 3). Tiến độ từng task xem ở
-[`../task_managements/process_task.md`](../task_managements/process_task.md) (BE-0.1 đã xong). 01–04 giữ ở
+[`../task_managements/process_task.md`](../task_managements/process_task.md) (BE-0.1 đang review). 01–04 giữ ở
 `status: draft` và chỉ dùng để tham khảo.
 
 Việc còn treo:

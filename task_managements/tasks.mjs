@@ -197,8 +197,14 @@ function loadTickets() {
 function syncPlanCheckboxes(tickets) {
   const status = Object.fromEntries(tickets.map(t => [t.id, t.status]));
   const before = readFileSync(PLAN, 'utf8');
-  const after = before.replace(/^### \[([ xX])\] (\S+) · /gm, (all, _box, id) =>
-    id in status ? `### [${status[id] === 'done' ? 'x' : ' '}] ${id} · ` : all);
+  let inFence = false;
+  // Bỏ qua dòng trong khối code, giống parsePlan.
+  const after = before.split('\n').map(line => {
+    if (line.startsWith('```')) inFence = !inFence;
+    const m = !inFence && line.match(TASK_RE);
+    if (!m || !(m[2] in status)) return line;
+    return `### [${status[m[2]] === 'done' ? 'x' : ' '}] ${m[2]} · ${m[3]}`;
+  }).join('\n');
   if (after !== before) {
     writeFileSync(PLAN, after);
     console.log('build: đã đồng bộ ô [x] trong plan.');
@@ -327,12 +333,23 @@ function setStatus(id, status) {
 
 const MAX_BODY = 16 * 1024;
 
-async function readJson(req) {
-  let raw = '';
-  for await (const chunk of req) {
-    raw += chunk;
-    if (raw.length > MAX_BODY) throw new HttpError(413, 'body quá lớn');
+function decodePath(part) {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    throw new HttpError(400, 'đường dẫn không hợp lệ');
   }
+}
+
+async function readJson(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_BODY) throw new HttpError(413, 'body quá lớn');
+    chunks.push(chunk);
+  }
+  const raw = Buffer.concat(chunks).toString('utf8');
   let body;
   try {
     body = JSON.parse(raw || '{}');
@@ -369,7 +386,7 @@ async function serve() {
       }
       const md = url.pathname.match(/^\/tickets\/([^/]+)\.md$/);
       if (req.method === 'GET' && md) {
-        return send(res, 200, readText(ticketFile(decodeURIComponent(md[1]))), 'text/plain; charset=utf-8');
+        return send(res, 200, readText(ticketFile(decodePath(md[1]))), 'text/plain; charset=utf-8');
       }
       const m = url.pathname.match(/^\/api\/tickets\/([^/]+)$/);
       if (req.method === 'PATCH' && m) {
@@ -378,14 +395,16 @@ async function serve() {
           throw new HttpError(403, 'origin không được phép');
         }
         const { status } = await readJson(req);
-        const id = decodeURIComponent(m[1]);
+        const id = decodePath(m[1]);
         setStatus(id, status);
         console.log(`${id} → ${status}`);
         return send(res, 200, boardData(build({ quiet: true })));
       }
       send(res, 404, { detail: 'not found' });
     } catch (e) {
-      send(res, e.code ?? 500, { detail: e.message });
+      // Chỉ HttpError mang mã HTTP; lỗi khác (vd. fs trả code 'EACCES') là 500.
+      if (!(e instanceof HttpError)) console.error(e);
+      send(res, e instanceof HttpError ? e.code : 500, { detail: e.message });
     }
   }).listen(port, '127.0.0.1', () => {
     console.log(`board: http://localhost:${port}  (Ctrl+C để dừng)`);

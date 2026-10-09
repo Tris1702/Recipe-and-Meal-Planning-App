@@ -279,7 +279,7 @@ if (LIVE) {
 }
 
 // Chỉ cho link http(s), đường dẫn tương đối và #anchor; chặn javascript:, data:…
-const SAFE_HREF = /^(https?:\/\/|\.{0,2}\/|#|[\w.-]+(\/[\w.-]+)*(#[\w-]*)?$)/;
+const SAFE_HREF = /^(https?:\/\/|\.{1,2}\/|\/(?!\/)|#|[\w.-]+(\/[\w.-]+)*(#[\w-]*)?$)/;
 
 function md(src) {
   const inline = s => esc(s)
